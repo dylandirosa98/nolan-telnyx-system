@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: messaging
+      POSTGRES_USER: messaging
+      POSTGRES_PASSWORD: messaging
+    ports: ["55432:5432"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U messaging -d messaging"], interval: 2s, timeout: 3s, retries: 20}
+  migrate:
+    image: postgres:16-alpine
+    depends_on: {postgres: {condition: service_healthy}}
+    volumes: ["./migrations:/migrations:ro"]
+    environment: {PGPASSWORD: messaging}
+    entrypoint: ["sh", "-c"]
+    command: ["psql -h postgres -U messaging -d messaging -f /migrations/001_init.sql"]
+  api:
+    build: .
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    environment:
+      DATABASE_URL: postgres://messaging:messaging@postgres:5432/messaging
+      ENABLE_SENDING: "false"
+      HTTP_ADDR: :8080
+    ports: ["8080:8080"]
+    command: ["/app/api"]
+  worker:
+    build: .
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    environment:
+      DATABASE_URL: postgres://messaging:messaging@postgres:5432/messaging
+      ENABLE_SENDING: "false"
+    command: ["/app/worker"]
