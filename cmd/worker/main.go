@@ -6,6 +6,7 @@ import (
 	"example.com/ghl-telnyx-integration/internal/config"
 	"example.com/ghl-telnyx-integration/internal/provider"
 	"example.com/ghl-telnyx-integration/internal/store"
+	"example.com/ghl-telnyx-integration/internal/workflow"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
 	"net/http"
@@ -26,8 +27,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	a := &app.App{Store: &store.Store{DB: db}, Telnyx: &provider.TelnyxClient{BaseURL: c.TelnyxBaseURL, Token: c.TelnyxToken, MessagingProfileID: c.TelnyxProfileID, HTTP: &http.Client{Timeout: 15 * time.Second}}, EnableSending: c.EnableSending}
+	workflows, e := workflow.EnabledCatalog(c.EnabledWorkflowKeys)
+	if e != nil {
+		slog.Error("workflow configuration", "error", e)
+		os.Exit(1)
+	}
+	a := &app.App{Store: &store.Store{DB: db}, Telnyx: &provider.TelnyxClient{BaseURL: c.TelnyxBaseURL, Token: c.TelnyxToken, MessagingProfileID: c.TelnyxProfileID, HTTP: &http.Client{Timeout: 15 * time.Second}}, EnableSending: c.EnableSending, Workflows: workflows, Logger: slog.Default()}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	go a.RunWorkflowWorker(ctx)
 	a.RunWorker(ctx)
 }

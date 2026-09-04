@@ -13,7 +13,7 @@ services:
     volumes: ["./migrations:/migrations:ro"]
     environment: {PGPASSWORD: messaging}
     entrypoint: ["sh", "-c"]
-    command: ["psql -h postgres -U messaging -d messaging -f /migrations/001_init.sql"]
+    command: ["for f in /migrations/*.sql; do psql -v ON_ERROR_STOP=1 -h postgres -U messaging -d messaging -f \"$$f\" || exit 1; done"]
   api:
     build: .
     depends_on: {migrate: {condition: service_completed_successfully}}

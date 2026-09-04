@@ -17,5 +17,9 @@ type Telnyx interface {
 type HighLevel interface {
 	ForwardInbound(context.Context, Inbound) error
 	SetSMSDND(context.Context, string) error
+	UpdateMessageStatus(context.Context, string, string) error
 }
-type Inbound struct{ LocationID, From, To, Text, ProviderEventID string }
+type Inbound struct {
+	LocationID, ContactID, ConversationID string
+	From, To, Text, ProviderEventID       string
+}

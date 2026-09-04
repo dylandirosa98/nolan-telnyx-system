@@ -1,6 +1,6 @@
 # Messaging Compliance Design
 
-**Status:** Draft — provider and final campaign details are not yet selected.  
+**Status:** Draft — Telnyx API access is verified. The brand is accepted and the TCR campaign status is ACTIVE, but the Telnyx campaign review is `TELNYX_FAILED` pending opt-in and privacy-policy corrections. No sending number is assigned.
 **Purpose:** Define technical safeguards. This document is not legal advice.
 
 ## Responsibility split

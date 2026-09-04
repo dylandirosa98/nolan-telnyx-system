@@ -6,18 +6,34 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
-	DatabaseURL, TelnyxBaseURL, TelnyxToken, TelnyxProfileID, FromNumber, HighLevelToken string
-	WebhookKey                                                                           ed25519.PublicKey
-	EnableSending                                                                        bool
-	Shutdown                                                                             time.Duration
+	DatabaseURL, TelnyxBaseURL, TelnyxToken, TelnyxProfileID, FromNumber                   string
+	HighLevelToken, HighLevelBaseURL, HighLevelLocationID, HighLevelConversationProviderID string
+	HighLevelWebhookSecret                                                                 string
+	EnabledWorkflowKeys                                                                    []string
+	WebhookKey                                                                             ed25519.PublicKey
+	EnableSending                                                                          bool
+	Shutdown                                                                               time.Duration
 }
 
 func Load() (Config, error) {
-	c := Config{DatabaseURL: os.Getenv("DATABASE_URL"), TelnyxBaseURL: os.Getenv("TELNYX_BASE_URL"), TelnyxToken: os.Getenv("TELNYX_API_KEY"), TelnyxProfileID: os.Getenv("TELNYX_MESSAGING_PROFILE_ID"), FromNumber: os.Getenv("TELNYX_FROM_NUMBER"), HighLevelToken: os.Getenv("HIGHLEVEL_TOKEN"), Shutdown: 10 * time.Second}
+	c := Config{
+		DatabaseURL:                     os.Getenv("DATABASE_URL"),
+		TelnyxBaseURL:                   os.Getenv("TELNYX_BASE_URL"),
+		TelnyxToken:                     os.Getenv("TELNYX_API_KEY"),
+		TelnyxProfileID:                 os.Getenv("TELNYX_MESSAGING_PROFILE_ID"),
+		FromNumber:                      os.Getenv("TELNYX_FROM_NUMBER"),
+		HighLevelToken:                  os.Getenv("HIGHLEVEL_TOKEN"),
+		HighLevelBaseURL:                valueOrDefault("HIGHLEVEL_BASE_URL", "https://services.leadconnectorhq.com"),
+		HighLevelLocationID:             os.Getenv("HIGHLEVEL_LOCATION_ID"),
+		HighLevelConversationProviderID: os.Getenv("HIGHLEVEL_CONVERSATION_PROVIDER_ID"),
+		HighLevelWebhookSecret:          os.Getenv("HIGHLEVEL_WEBHOOK_SECRET"),
+		Shutdown:                        10 * time.Second,
+	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
 	}
@@ -29,5 +45,17 @@ func Load() (Config, error) {
 		c.WebhookKey = ed25519.PublicKey(b)
 	}
 	c.EnableSending, _ = strconv.ParseBool(os.Getenv("ENABLE_SENDING"))
+	for _, key := range strings.Split(os.Getenv("ENABLED_WORKFLOWS"), ",") {
+		if key = strings.TrimSpace(key); key != "" {
+			c.EnabledWorkflowKeys = append(c.EnabledWorkflowKeys, key)
+		}
+	}
 	return c, nil
+}
+
+func valueOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }

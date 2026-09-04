@@ -2,7 +2,7 @@
 
 Local, consent-oriented Telnyx-only MVP. It accepts authenticated HighLevel outbound requests, durably queues them in PostgreSQL, and has a separate worker process. Telnyx inbound webhooks are verified with the official Ed25519 header scheme, persisted through suppression/queue cancellation, and forwarded through an unverified HighLevel adapter seam.
 
-Sending is disabled by default and remains disabled in Compose. No provider or HighLevel account access is present; this repository does not claim live integration readiness or 10DLC completion.
+Live HighLevel source/destination API access and Telnyx account API access have now been verified. The Telnyx brand is accepted and the TCR campaign status is `ACTIVE`, but Telnyx reports the campaign as `TELNYX_FAILED` pending opt-in evidence and privacy-policy corrections. There is no messaging number or number-to-campaign assignment. Sending remains disabled by default and in Compose. The legacy CRM's API-addressable pipeline, field, tag, and custom-value structure has been migrated to the new HighLevel location without querying or copying CRM records. The repository does not yet claim live messaging readiness.
 
 ## Local demonstration
 

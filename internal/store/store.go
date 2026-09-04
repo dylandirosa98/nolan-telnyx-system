@@ -9,7 +9,7 @@ import (
 )
 
 type Store struct{ DB *pgxpool.Pool }
-type Outbound struct{ LocationID, MessageID, To, From, Text string }
+type Outbound struct{ LocationID, ContactID, MessageID, To, From, Text string }
 
 func (s *Store) Enqueue(ctx context.Context, o Outbound) (bool, error) {
 	b, _ := json.Marshal(o)
@@ -38,19 +38,25 @@ type Job struct {
 
 func (s *Store) Claim(ctx context.Context) (Job, error) {
 	var j Job
-	err := s.DB.QueryRow(ctx, `WITH next AS (SELECT id FROM outbound_jobs WHERE status='queued' AND available_at<=now() ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE outbound_jobs o SET status='sending',attempts=attempts+1,updated_at=now() FROM next WHERE o.id=next.id RETURNING o.id,o.location_id,o.message_id,o.to_number,o.from_number,o.body,o.attempts`).Scan(&j.ID, &j.LocationID, &j.MessageID, &j.To, &j.From, &j.Text, &j.Attempts)
+	err := s.DB.QueryRow(ctx, `WITH next AS (
+		SELECT id FROM outbound_jobs
+		WHERE (status='queued' AND available_at<=now()) OR (status='sending' AND locked_until<now())
+		ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT 1
+	) UPDATE outbound_jobs o SET status='sending',attempts=attempts+1,locked_until=now()+interval '2 minutes',updated_at=now()
+	FROM next WHERE o.id=next.id
+	RETURNING o.id,o.location_id,o.message_id,o.to_number,o.from_number,o.body,o.attempts`).Scan(&j.ID, &j.LocationID, &j.MessageID, &j.To, &j.From, &j.Text, &j.Attempts)
 	return j, err
 }
 func (s *Store) Complete(ctx context.Context, id int64, providerID string) error {
-	_, e := s.DB.Exec(ctx, `UPDATE outbound_jobs SET status='sent',provider_message_id=$2,updated_at=now() WHERE id=$1`, id, providerID)
+	_, e := s.DB.Exec(ctx, `UPDATE outbound_jobs SET status='sent',provider_message_id=$2,locked_until=NULL,updated_at=now() WHERE id=$1`, id, providerID)
 	return e
 }
 func (s *Store) Retry(ctx context.Context, id int64, delay time.Duration) error {
-	_, e := s.DB.Exec(ctx, `UPDATE outbound_jobs SET status='queued',available_at=now()+$2::interval,updated_at=now() WHERE id=$1`, id, fmt.Sprintf("%f seconds", delay.Seconds()))
+	_, e := s.DB.Exec(ctx, `UPDATE outbound_jobs SET status='queued',available_at=now()+$2::interval,locked_until=NULL,updated_at=now() WHERE id=$1`, id, fmt.Sprintf("%f seconds", delay.Seconds()))
 	return e
 }
 func (s *Store) Fail(ctx context.Context, id int64) error {
-	_, e := s.DB.Exec(ctx, `UPDATE outbound_jobs SET status='failed',updated_at=now() WHERE id=$1`, id)
+	_, e := s.DB.Exec(ctx, `UPDATE outbound_jobs SET status='failed',locked_until=NULL,updated_at=now() WHERE id=$1`, id)
 	return e
 }
 func (s *Store) SendingPaused(ctx context.Context) (bool, error) {
@@ -66,9 +72,22 @@ func (s *Store) UpdateDelivery(ctx context.Context, eventID, providerID, status 
 	_, e := s.DB.Exec(ctx, `INSERT INTO delivery_events(provider_event_id,job_id,status) SELECT $1,id,$3 FROM outbound_jobs WHERE provider_message_id=$2 ON CONFLICT(provider_event_id) DO NOTHING`, eventID, providerID, status)
 	return e
 }
-func (s *Store) RecordInbound(ctx context.Context, eventID, from, to, body string) error {
-	_, e := s.DB.Exec(ctx, `INSERT INTO inbound_messages(provider_event_id,from_number,to_number,body) VALUES($1,$2,$3,$4) ON CONFLICT(provider_event_id) DO NOTHING`, eventID, from, to, body)
-	return e
+
+func (s *Store) FindOutboundByProviderID(ctx context.Context, providerID string) (Outbound, error) {
+	var outbound Outbound
+	var payload []byte
+	err := s.DB.QueryRow(ctx, `SELECT payload FROM outbound_jobs WHERE provider_message_id=$1`, providerID).Scan(&payload)
+	if err != nil {
+		return Outbound{}, err
+	}
+	if err = json.Unmarshal(payload, &outbound); err != nil {
+		return Outbound{}, err
+	}
+	return outbound, nil
+}
+func (s *Store) RecordInbound(ctx context.Context, eventID, from, to, body string) (bool, error) {
+	result, err := s.DB.Exec(ctx, `INSERT INTO inbound_messages(provider_event_id,from_number,to_number,body) VALUES($1,$2,$3,$4) ON CONFLICT(provider_event_id) DO NOTHING`, eventID, from, to, body)
+	return result.RowsAffected() == 1, err
 }
 
 var _ = fmt.Sprint

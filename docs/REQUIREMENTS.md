@@ -68,11 +68,11 @@ The production system must preserve the distinction between an inbound inquiry a
 
 ## Provider status
 
-- Telnyx was initially proposed.
-- Twilio was previously used through LeadConnector and is also under consideration.
-- Provider selection is not final.
-- Both providers require consent-based messaging and prohibit unsolicited bulk traffic.
-- Historical message delivery does not establish current provider-policy or legal compliance.
+- Telnyx is the selected MVP provider.
+- Live Telnyx API access is verified.
+- The client-owned Telnyx account currently has one accepted 10DLC brand and one TCR campaign reporting `ACTIVE`, but Telnyx reports the campaign as `TELNYX_FAILED` pending opt-in evidence and privacy-policy corrections.
+- No messaging phone numbers or number-to-campaign assignments exist yet, so live sending is not ready.
+- Historical LeadConnector/Twilio delivery does not establish current Telnyx-policy or legal compliance.
 
 ## Responsibility boundary
 
@@ -129,9 +129,7 @@ Request sanitized examples rather than customer PII:
 
 ## Unresolved business requirements
 
-- Final provider: Telnyx or Twilio.
-- Number type and number ownership.
-- Whether the existing number must be retained.
+- Number type, area code, and number ownership.
 - Exact campaign creation and scheduling workflow in HighLevel.
 - Quiet hours and recipient timezone behavior.
 - Follow-up sequence and stopping conditions.

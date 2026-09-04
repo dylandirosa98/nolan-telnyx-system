@@ -11,4 +11,4 @@ Completed locally: domain validation/keywords/retry classification, Telnyx signa
 - `DATABASE_URL=postgres://messaging:messaging@localhost:55432/messaging go test ./internal/app -run TestFakeLocalEndToEnd -count=1` passed against Compose PostgreSQL and the fake Telnyx provider.
 - `docker-compose up -d --build` completed; `GET /healthz` returned `{"status":"ok"}` and `GET /readyz` returned `{"status":"ready"}`.
 
-Before pilot: exercise against a Telnyx test-capable account and HighLevel installation; confirm webhook payloads/signatures, DND and conversation APIs, delivery correlation, 10DLC registration, consent evidence, quiet hours, monitoring, and rollback. Full-volume production is not accepted until ramp tests pass.
+Before pilot: purchase one SMS-capable pilot number, assign it to the active 10DLC campaign and messaging profile, exercise the live HighLevel installation and Telnyx account, and confirm webhook payloads/signatures, DND and conversation APIs, delivery correlation, consent evidence, quiet hours, monitoring, and rollback. Full-volume production is not accepted until ramp tests pass.

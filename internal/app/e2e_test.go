@@ -27,13 +27,14 @@ func TestFakeLocalEndToEnd(t *testing.T) {
 	s := &store.Store{DB: db}
 	_, _ = db.Exec(ctx, `UPDATE settings SET sending_paused=false WHERE id=1`)
 	fake := &provider.FakeTelnyx{}
-	a := &App{Store: s, Telnyx: fake, EnableSending: true}
+	a := &App{Store: s, Telnyx: fake, HLSecret: "test-secret", FromNumber: "+13105551213", EnableSending: true}
 	id := "e2e-" + time.Now().Format("150405.000000000")
-	b, _ := json.Marshal(map[string]string{"location_id": "loc-e2e", "message_id": id, "to": "+13125551212", "from": "+13125551213", "text": "hello"})
+	b, _ := json.Marshal(map[string]string{"contactId": "contact-e2e", "locationId": "loc-e2e", "messageId": id, "type": "SMS", "phone": "+13105551212", "message": "hello"})
 	r := httptest.NewRequest("POST", "/webhooks/highlevel/outbound", bytes.NewReader(b))
+	r.Header.Set("Authorization", "Bearer test-secret")
 	w := httptest.NewRecorder()
 	a.Routes().ServeHTTP(w, r)
-	if w.Code != 202 {
+	if w.Code != 200 {
 		t.Fatalf("enqueue status %d", w.Code)
 	}
 	run, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -44,5 +45,22 @@ func TestFakeLocalEndToEnd(t *testing.T) {
 	defer fake.Mu.Unlock()
 	if len(fake.Sent) != 1 {
 		t.Fatalf("sent %d messages", len(fake.Sent))
+	}
+}
+
+func TestHighLevelDeliveryStatus(t *testing.T) {
+	recipients := []struct {
+		PhoneNumber string `json:"phone_number"`
+		Status      string `json:"status"`
+	}{{PhoneNumber: "+131****1212", Status: "delivered"}}
+	if got := highLevelDeliveryStatus("message.sent", recipients); got != "pending" {
+		t.Fatalf("sent status=%s", got)
+	}
+	if got := highLevelDeliveryStatus("message.finalized", recipients); got != "delivered" {
+		t.Fatalf("finalized status=%s", got)
+	}
+	recipients[0].Status = "delivery_failed"
+	if got := highLevelDeliveryStatus("message.finalized", recipients); got != "failed" {
+		t.Fatalf("failed status=%s", got)
 	}
 }
