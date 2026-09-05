@@ -21,7 +21,7 @@ func VerifyTelnyx(r *http.Request, body []byte, key ed25519.PublicKey, now time.
 		return fmt.Errorf("stale webhook")
 	}
 	s, err := base64.StdEncoding.DecodeString(sig)
-	if err != nil || !ed25519.Verify(key, []byte(ts+"."+string(body)), s) {
+	if err != nil || !ed25519.Verify(key, []byte(ts+"|"+string(body)), s) {
 		return fmt.Errorf("invalid webhook signature")
 	}
 	return nil

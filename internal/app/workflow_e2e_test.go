@@ -51,7 +51,7 @@ func TestWorkflowLocalEndToEnd(t *testing.T) {
 		"contact_id":     externalID,
 		"to":             "+13105551212",
 		"from":           "+13105551213",
-		"timezone":       "America/New_York",
+		"timezone":       "Asia/Tokyo",
 		"consent_at":     stamp.Add(-time.Hour),
 		"consent_source": "postcard_keyword_reply",
 		"variables":      map[string]string{"contact.first_name": "Sam", "contact.full_address": "123 Main St", "location.name": "Example Company"},
@@ -100,7 +100,7 @@ func TestWorkflowLocalEndToEnd(t *testing.T) {
 		},
 	}})
 	timestamp := fmt.Sprint(time.Now().Unix())
-	signature := ed25519.Sign(privateKey, []byte(timestamp+"."+string(webhookBody)))
+	signature := ed25519.Sign(privateKey, []byte(timestamp+"|"+string(webhookBody)))
 	request = httptest.NewRequest("POST", "/webhooks/telnyx", bytes.NewReader(webhookBody))
 	request.Header.Set("telnyx-timestamp", timestamp)
 	request.Header.Set("telnyx-signature-ed25519", base64.StdEncoding.EncodeToString(signature))

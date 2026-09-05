@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"example.com/ghl-telnyx-integration/internal/domain"
 	"example.com/ghl-telnyx-integration/internal/workflow"
 	"github.com/jackc/pgx/v5"
 )
@@ -32,7 +33,7 @@ func (a *App) enrollWorkflow(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if a.HLSecret == "" || r.Header.Get("Authorization") != "Bearer "+a.HLSecret {
+	if a.HLSecret == "" || !bearerSecretOK(r.Header.Get("Authorization"), a.HLSecret) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -50,6 +51,14 @@ func (a *App) enrollWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.ExternalID == "" || request.LocationID == "" || request.From == "" {
 		http.Error(w, "external_id, location_id, and from are required", http.StatusBadRequest)
+		return
+	}
+	if a.LocationID != "" && request.LocationID != a.LocationID {
+		http.Error(w, "unknown location", http.StatusForbidden)
+		return
+	}
+	if domain.ValidateE164(request.From) != nil || (request.To != "" && domain.ValidateE164(request.To) != nil) {
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 	enrollment, err := workflow.Start(definition, workflow.Contact{
@@ -80,6 +89,7 @@ func (a *App) enrollWorkflow(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) RunWorkflowWorker(ctx context.Context) {
 	if !a.EnableSending {
+		<-ctx.Done()
 		return
 	}
 	logger := a.Logger

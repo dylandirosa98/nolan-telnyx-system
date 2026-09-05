@@ -83,4 +83,8 @@ func TestHighLevelDeliveryStatus(t *testing.T) {
 	if got := highLevelDeliveryStatus("message.finalized", recipients); got != "failed" {
 		t.Fatalf("failed status=%s", got)
 	}
+	recipients[0].Status = "delivery_unconfirmed"
+	if got := highLevelDeliveryStatus("message.finalized", recipients); got != "pending" {
+		t.Fatalf("unconfirmed status=%s", got)
+	}
 }

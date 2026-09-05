@@ -15,6 +15,7 @@ import (
 type HighLevelClient struct {
 	BaseURL                string
 	Token                  string
+	Tokens                 Tokens
 	LocationID             string
 	ConversationProviderID string
 	HTTP                   *http.Client
@@ -37,18 +38,17 @@ func (c *HighLevelClient) ForwardInbound(ctx context.Context, inbound Inbound) e
 			return err
 		}
 	}
-	if c.ConversationProviderID == "" {
-		return fmt.Errorf("HighLevel conversation provider id is required")
-	}
 	body := map[string]any{
-		"type":                   "SMS",
-		"message":                inbound.Text,
-		"conversationId":         conversationID,
-		"contactId":              contactID,
-		"conversationProviderId": c.ConversationProviderID,
-		"direction":              "inbound",
-		"altId":                  inbound.ProviderEventID,
-		"date":                   time.Now().UTC().Format(time.RFC3339Nano),
+		"type":           "SMS",
+		"message":        inbound.Text,
+		"conversationId": conversationID,
+		"contactId":      contactID,
+		"direction":      "inbound",
+		"altId":          inbound.ProviderEventID,
+		"date":           time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if c.ConversationProviderID != "" {
+		body["conversationProviderId"] = c.ConversationProviderID
 	}
 	return c.doJSON(ctx, http.MethodPost, "/conversations/messages/inbound", body, nil)
 }
@@ -71,6 +71,59 @@ func (c *HighLevelClient) UpdateMessageStatus(ctx context.Context, messageID, st
 		return fmt.Errorf("unsupported HighLevel message status %q", status)
 	}
 	return c.doJSON(ctx, http.MethodPut, "/conversations/messages/"+url.PathEscape(messageID)+"/status", map[string]string{"status": status}, nil)
+}
+
+func (c *HighLevelClient) ExecuteCRM(ctx context.Context, job CRMJob) error {
+	contactID := job.ContactID
+	if contactID == "" && job.Phone != "" {
+		var err error
+		contactID, err = c.findContactID(ctx, job.Phone)
+		if err != nil {
+			return err
+		}
+	}
+	if contactID == "" {
+		return fmt.Errorf("HighLevel contact id is required for CRM action %q", job.Action)
+	}
+	switch job.Action {
+	case "create_task":
+		title := strings.TrimSpace(job.Body)
+		if title == "" {
+			title = "Follow up"
+		}
+		body := map[string]any{
+			"title":     title,
+			"body":      job.Body,
+			"dueDate":   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			"completed": false,
+		}
+		return c.doJSON(ctx, http.MethodPost, "/contacts/"+url.PathEscape(contactID)+"/tasks", body, nil)
+	case "archive_conversation":
+		conversationID, err := c.findOrCreateConversation(ctx, contactID)
+		if err != nil {
+			return err
+		}
+		if err = c.doJSON(ctx, http.MethodPut, "/conversations/"+url.PathEscape(conversationID), map[string]any{
+			"locationId":  firstNonEmpty(job.LocationID, c.LocationID),
+			"unreadCount": 0,
+		}, nil); err != nil {
+			return err
+		}
+		return c.createNote(ctx, contactID, "Conversation archived after negative reply.")
+	default:
+		note := "Workflow CRM action: " + job.Action
+		if strings.TrimSpace(job.Reply) != "" {
+			note += "\nReply: " + job.Reply
+		}
+		if strings.TrimSpace(job.Body) != "" {
+			note += "\n" + job.Body
+		}
+		return c.createNote(ctx, contactID, note)
+	}
+}
+
+func (c *HighLevelClient) createNote(ctx context.Context, contactID, body string) error {
+	return c.doJSON(ctx, http.MethodPost, "/contacts/"+url.PathEscape(contactID)+"/notes", map[string]string{"body": body}, nil)
 }
 
 func (c *HighLevelClient) findContactID(ctx context.Context, phone string) (string, error) {
@@ -125,6 +178,19 @@ func (c *HighLevelClient) findOrCreateConversation(ctx context.Context, contactI
 }
 
 func (c *HighLevelClient) doJSON(ctx context.Context, method, path string, requestBody any, responseBody any) error {
+	if err := c.doJSONOnce(ctx, method, path, requestBody, responseBody, false); err == nil {
+		return nil
+	} else if pe, ok := err.(*Error); !ok || pe.Status != http.StatusUnauthorized || c.Tokens == nil {
+		return err
+	}
+	return c.doJSONOnce(ctx, method, path, requestBody, responseBody, true)
+}
+
+func (c *HighLevelClient) doJSONOnce(ctx context.Context, method, path string, requestBody any, responseBody any, forceRefresh bool) error {
+	token, err := c.accessToken(ctx, forceRefresh)
+	if err != nil {
+		return err
+	}
 	var body io.Reader
 	if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
@@ -141,9 +207,9 @@ func (c *HighLevelClient) doJSON(ctx context.Context, method, path string, reque
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Authorization", "Bearer "+c.Token)
+	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Version", "v3")
+	request.Header.Set("Version", "2021-07-28")
 	if requestBody != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -158,7 +224,7 @@ func (c *HighLevelClient) doJSON(ctx context.Context, method, path string, reque
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		payload, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-		return fmt.Errorf("HighLevel %s %s returned %d: %s", method, path, response.StatusCode, strings.TrimSpace(string(payload)))
+		return &Error{Status: response.StatusCode, Code: fmt.Sprint(response.StatusCode), Message: strings.TrimSpace(string(payload))}
 	}
 	if responseBody == nil {
 		_, _ = io.Copy(io.Discard, response.Body)
@@ -168,4 +234,28 @@ func (c *HighLevelClient) doJSON(ctx context.Context, method, path string, reque
 		return fmt.Errorf("decode HighLevel response: %w", err)
 	}
 	return nil
+}
+
+func (c *HighLevelClient) accessToken(ctx context.Context, forceRefresh bool) (string, error) {
+	if forceRefresh {
+		if refresher, ok := c.Tokens.(TokenRefresher); ok {
+			return refresher.ForceRefresh(ctx)
+		}
+	}
+	if c.Tokens != nil {
+		return c.Tokens.Token(ctx)
+	}
+	if c.Token == "" {
+		return "", fmt.Errorf("HighLevel access token is required")
+	}
+	return c.Token, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

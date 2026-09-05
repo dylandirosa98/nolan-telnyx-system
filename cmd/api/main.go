@@ -2,6 +2,13 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"example.com/ghl-telnyx-integration/internal/app"
 	"example.com/ghl-telnyx-integration/internal/config"
 	"example.com/ghl-telnyx-integration/internal/provider"
@@ -10,12 +17,6 @@ import (
 	"example.com/ghl-telnyx-integration/internal/workflow"
 	"example.com/ghl-telnyx-integration/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"log/slog"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
@@ -44,7 +45,23 @@ func main() {
 		os.Exit(1)
 	}
 	httpClient := &http.Client{Timeout: 15 * time.Second}
-	a := &app.App{Store: &store.Store{DB: db}, Telnyx: &provider.TelnyxClient{BaseURL: c.TelnyxBaseURL, Token: c.TelnyxToken, MessagingProfileID: c.TelnyxProfileID, HTTP: httpClient}, HighLevel: &provider.HighLevelClient{BaseURL: c.HighLevelBaseURL, Token: c.HighLevelToken, LocationID: c.HighLevelLocationID, ConversationProviderID: c.HighLevelConversationProviderID, HTTP: httpClient}, WebhookKey: c.WebhookKey, HighLevelWebhookKey: highLevelWebhookKey, HLSecret: c.HighLevelWebhookSecret, FromNumber: c.FromNumber, EnableSending: c.EnableSending, Workflows: workflows, Logger: slog.Default()}
+	st := &store.Store{DB: db}
+	oauth := &provider.OAuthClient{
+		BaseURL: c.HighLevelBaseURL, ClientID: c.HighLevelClientID, ClientSecret: c.HighLevelClientSecret,
+		RedirectURI: c.HighLevelRedirectURI, UserType: c.HighLevelUserType, HTTP: httpClient,
+	}
+	a := &app.App{
+		Store:  st,
+		Telnyx: &provider.TelnyxClient{BaseURL: c.TelnyxBaseURL, Token: c.TelnyxToken, MessagingProfileID: c.TelnyxProfileID, HTTP: httpClient},
+		HighLevel: &provider.HighLevelClient{
+			BaseURL: c.HighLevelBaseURL, Token: c.HighLevelToken,
+			Tokens:     &provider.HighLevelTokenSource{Store: st, OAuth: oauth, LocationID: c.HighLevelLocationID, Fallback: c.HighLevelToken},
+			LocationID: c.HighLevelLocationID, ConversationProviderID: c.HighLevelConversationProviderID, HTTP: httpClient,
+		},
+		OAuth: oauth, WebhookKey: c.WebhookKey, HighLevelWebhookKey: highLevelWebhookKey,
+		HLSecret: c.HighLevelWebhookSecret, AdminToken: c.AdminToken, LocationID: c.HighLevelLocationID,
+		FromNumber: c.FromNumber, EnableSending: c.EnableSending, Workflows: workflows, Logger: slog.Default(),
+	}
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: a.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()

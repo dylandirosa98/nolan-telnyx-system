@@ -110,7 +110,16 @@ func (s *Store) ApplyWorkflowCommands(ctx context.Context, record WorkflowRecord
 		switch command.Type {
 		case workflow.CommandSendSMS:
 			messageID := fmt.Sprintf("workflow:%d:%d", record.ID, record.Enrollment.SentCount)
-			payload, _ := json.Marshal(map[string]any{"workflow_key": record.Enrollment.WorkflowKey, "enrollment_id": record.ID})
+			payload, _ := json.Marshal(map[string]any{
+				"workflow_key":  record.Enrollment.WorkflowKey,
+				"enrollment_id": record.ID,
+				"location_id":   record.LocationID,
+				"contact_id":    record.Enrollment.Contact.ID,
+				"message_id":    messageID,
+				"to":            record.Enrollment.Contact.Phone,
+				"from":          record.From,
+				"text":          command.Body,
+			})
 			availableAt, rateErr := reserveWorkflowRate(ctx, tx, record.Enrollment.WorkflowKey, command.Rate)
 			if rateErr != nil {
 				return rateErr

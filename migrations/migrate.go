@@ -27,17 +27,40 @@ func Apply(ctx context.Context, db *pgxpool.Pool) error {
 	}
 	defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationLockID) }()
 
+	if _, err = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
 	names, err := migrationFiles()
 	if err != nil {
 		return err
 	}
 	for _, name := range names {
+		var applied bool
+		if err = conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename=$1)`, name).Scan(&applied); err != nil {
+			return fmt.Errorf("check migration %s: %w", name, err)
+		}
+		if applied {
+			continue
+		}
 		sql, readErr := files.ReadFile(name)
 		if readErr != nil {
 			return fmt.Errorf("read migration %s: %w", name, readErr)
 		}
-		if _, execErr := conn.Exec(ctx, string(sql)); execErr != nil {
+		tx, txErr := conn.Begin(ctx)
+		if txErr != nil {
+			return fmt.Errorf("begin migration %s: %w", name, txErr)
+		}
+		if _, execErr := tx.Exec(ctx, string(sql)); execErr != nil {
+			_ = tx.Rollback(ctx)
 			return fmt.Errorf("apply migration %s: %w", name, execErr)
+		}
+		if _, execErr := tx.Exec(ctx, `INSERT INTO schema_migrations(filename) VALUES($1)`, name); execErr != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("record migration %s: %w", name, execErr)
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return fmt.Errorf("commit migration %s: %w", name, commitErr)
 		}
 	}
 	return nil

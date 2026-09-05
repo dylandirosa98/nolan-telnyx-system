@@ -15,9 +15,13 @@ func TestVerifyTelnyxSignature(t *testing.T) {
 	ts := "1700000000"
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Header.Set("telnyx-timestamp", ts)
-	req.Header.Set("telnyx-signature-ed25519", base64.StdEncoding.EncodeToString(ed25519.Sign(priv, append([]byte(ts+"."), body...))))
+	req.Header.Set("telnyx-signature-ed25519", base64.StdEncoding.EncodeToString(ed25519.Sign(priv, append([]byte(ts+"|"), body...))))
 	if err := VerifyTelnyx(req, body, pub, now, time.Minute); err != nil {
 		t.Fatal(err)
+	}
+	req.Header.Set("telnyx-signature-ed25519", base64.StdEncoding.EncodeToString(ed25519.Sign(priv, append([]byte(ts+"."), body...))))
+	if VerifyTelnyx(req, body, pub, now, time.Minute) == nil {
+		t.Fatal("dot-separated signature from the old bug should fail")
 	}
 	req.Header.Set("telnyx-signature-ed25519", "bad")
 	if VerifyTelnyx(req, body, pub, now, time.Minute) == nil {
