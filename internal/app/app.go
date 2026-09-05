@@ -188,6 +188,7 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) RunWorker(ctx context.Context) {
 	if !a.EnableSending {
+		<-ctx.Done()
 		return
 	}
 	for {

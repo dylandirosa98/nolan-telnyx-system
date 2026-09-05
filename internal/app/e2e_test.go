@@ -48,6 +48,26 @@ func TestFakeLocalEndToEnd(t *testing.T) {
 	}
 }
 
+func TestDisabledWorkerWaitsForShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		(&App{}).RunWorker(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("disabled worker exited before shutdown")
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disabled worker did not stop after cancellation")
+	}
+}
+
 func TestHighLevelDeliveryStatus(t *testing.T) {
 	recipients := []struct {
 		PhoneNumber string `json:"phone_number"`
