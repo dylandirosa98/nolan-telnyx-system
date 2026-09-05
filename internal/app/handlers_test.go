@@ -90,7 +90,7 @@ func TestTelnyxRejectsDotSeparatedSignatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := []byte(`{"data":{"id":"evt","event_type":"message.received","payload":{"id":"m","from":{"phone_number":"+13125551212"},"to":[{"phone_number":"+13125551213"}],"text":"hi"}}}`)
+	body := []byte(`{"data":{"id":"evt","event_type":"message.received","payload":{"id":"m","from":{"phone_number":"+13155551212"},"to":[{"phone_number":"+13155551213"}],"text":"hi"}}}`)
 	ts := fmt.Sprint(time.Now().Unix())
 	sig := ed25519.Sign(priv, []byte(ts+"."+string(body)))
 	r := httptest.NewRequest("POST", "/webhooks/telnyx", bytes.NewReader(body))
@@ -100,5 +100,23 @@ func TestTelnyxRejectsDotSeparatedSignatures(t *testing.T) {
 	(&App{WebhookKey: pub}).Routes().ServeHTTP(w, r)
 	if w.Code != 401 {
 		t.Fatalf("status=%d", w.Code)
+	}
+}
+
+func TestTelnyxIgnoresInboundForUnknownNumber(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"data":{"id":"evt","event_type":"message.received","payload":{"id":"m","from":{"phone_number":"+13155551212"},"to":[{"phone_number":"+19995550101"}],"text":"hi"}}}`)
+	ts := fmt.Sprint(time.Now().Unix())
+	sig := ed25519.Sign(priv, []byte(ts+"|"+string(body)))
+	r := httptest.NewRequest("POST", "/webhooks/telnyx", bytes.NewReader(body))
+	r.Header.Set("telnyx-timestamp", ts)
+	r.Header.Set("telnyx-signature-ed25519", base64.StdEncoding.EncodeToString(sig))
+	w := httptest.NewRecorder()
+	(&App{WebhookKey: pub, FromNumber: "+13155551213"}).Routes().ServeHTTP(w, r)
+	if w.Code != 202 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }

@@ -133,6 +133,7 @@ func (s *Store) RecordInbound(ctx context.Context, eventID, from, to, body strin
 
 type InboundMessage struct {
 	EventID, From, To, Body string
+	Attempts                int
 }
 
 func (s *Store) ClaimUnprocessedInbound(ctx context.Context) (InboundMessage, error) {
@@ -140,11 +141,11 @@ func (s *Store) ClaimUnprocessedInbound(ctx context.Context) (InboundMessage, er
 	err := s.DB.QueryRow(ctx, `
 		WITH next AS (
 			SELECT provider_event_id FROM inbound_messages
-			WHERE processed_at IS NULL AND (locked_until IS NULL OR locked_until<now())
+			WHERE processed_at IS NULL AND failed_at IS NULL AND (locked_until IS NULL OR locked_until<now())
 			ORDER BY created_at,provider_event_id FOR UPDATE SKIP LOCKED LIMIT 1
-		) UPDATE inbound_messages i SET locked_until=now()+interval '2 minutes'
+		) UPDATE inbound_messages i SET locked_until=now()+interval '2 minutes',attempts=attempts+1
 		FROM next WHERE i.provider_event_id=next.provider_event_id
-		RETURNING i.provider_event_id,i.from_number,i.to_number,i.body`).Scan(&msg.EventID, &msg.From, &msg.To, &msg.Body)
+		RETURNING i.provider_event_id,i.from_number,i.to_number,i.body,i.attempts`).Scan(&msg.EventID, &msg.From, &msg.To, &msg.Body, &msg.Attempts)
 	return msg, err
 }
 
@@ -158,8 +159,14 @@ func (s *Store) RetryInbound(ctx context.Context, eventID string, delay time.Dur
 	return err
 }
 
+func (s *Store) FailInbound(ctx context.Context, eventID string) error {
+	_, err := s.DB.Exec(ctx, `UPDATE inbound_messages SET failed_at=now(),locked_until=NULL WHERE provider_event_id=$1`, eventID)
+	return err
+}
+
 type DeliveryEvent struct {
 	EventID, ProviderMessageID, Status string
+	Attempts                           int
 }
 
 func (s *Store) ClaimUnprocessedDelivery(ctx context.Context) (DeliveryEvent, error) {
@@ -167,11 +174,11 @@ func (s *Store) ClaimUnprocessedDelivery(ctx context.Context) (DeliveryEvent, er
 	err := s.DB.QueryRow(ctx, `
 		WITH next AS (
 			SELECT provider_event_id FROM delivery_events
-			WHERE highlevel_synced_at IS NULL AND (locked_until IS NULL OR locked_until<now())
+			WHERE highlevel_synced_at IS NULL AND failed_at IS NULL AND (locked_until IS NULL OR locked_until<now())
 			ORDER BY created_at,provider_event_id FOR UPDATE SKIP LOCKED LIMIT 1
-		) UPDATE delivery_events d SET locked_until=now()+interval '2 minutes'
+		) UPDATE delivery_events d SET locked_until=now()+interval '2 minutes',attempts=attempts+1
 		FROM next WHERE d.provider_event_id=next.provider_event_id
-		RETURNING d.provider_event_id,COALESCE(d.provider_message_id,''),d.status`).Scan(&event.EventID, &event.ProviderMessageID, &event.Status)
+		RETURNING d.provider_event_id,COALESCE(d.provider_message_id,''),d.status,d.attempts`).Scan(&event.EventID, &event.ProviderMessageID, &event.Status, &event.Attempts)
 	return event, err
 }
 
@@ -182,6 +189,11 @@ func (s *Store) MarkDeliverySynced(ctx context.Context, eventID string) error {
 
 func (s *Store) RetryDelivery(ctx context.Context, eventID string, delay time.Duration) error {
 	_, err := s.DB.Exec(ctx, `UPDATE delivery_events SET locked_until=now()+$2::interval WHERE provider_event_id=$1`, eventID, fmt.Sprintf("%f seconds", delay.Seconds()))
+	return err
+}
+
+func (s *Store) FailDelivery(ctx context.Context, eventID string) error {
+	_, err := s.DB.Exec(ctx, `UPDATE delivery_events SET failed_at=now(),locked_until=NULL WHERE provider_event_id=$1`, eventID)
 	return err
 }
 

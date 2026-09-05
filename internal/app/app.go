@@ -167,6 +167,10 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 		insertedDelivery = inserted
 	}
 	if e.Data.EventType == "message.received" && len(p.To) > 0 {
+		if a.FromNumber != "" && p.To[0].PhoneNumber != a.FromNumber {
+			w.WriteHeader(202)
+			return
+		}
 		inserted, err := a.Store.RecordInbound(r.Context(), e.Data.ID, p.From.PhoneNumber, p.To[0].PhoneNumber, p.Text)
 		if err != nil {
 			http.Error(w, "database error", 500)
@@ -207,7 +211,7 @@ func (a *App) processInbound(ctx context.Context, eventID, from, to, text string
 		}
 	}
 	if len(a.Workflows) > 0 {
-		if err := a.applyWorkflowReply(ctx, from, text); err != nil {
+		if err := a.applyWorkflowReply(ctx, from, to, text); err != nil {
 			return err
 		}
 	}
@@ -329,6 +333,7 @@ func (a *App) RunCRMWorker(ctx context.Context) {
 }
 
 func (a *App) RunInboundWorker(ctx context.Context) {
+	const maxAttempts = 5
 	for {
 		select {
 		case <-ctx.Done():
@@ -346,7 +351,11 @@ func (a *App) RunInboundWorker(ctx context.Context) {
 			worked = true
 			if err = a.processInbound(ctx, msg.EventID, msg.From, msg.To, msg.Body); err != nil {
 				a.logger().Error("process inbound", "error", err)
-				_ = a.Store.RetryInbound(ctx, msg.EventID, time.Minute)
+				if msg.Attempts >= maxAttempts {
+					_ = a.Store.FailInbound(ctx, msg.EventID)
+				} else {
+					_ = a.Store.RetryInbound(ctx, msg.EventID, highLevelRetryDelay(msg.Attempts))
+				}
 			}
 		}
 		event, err := a.Store.ClaimUnprocessedDelivery(ctx)
@@ -359,13 +368,21 @@ func (a *App) RunInboundWorker(ctx context.Context) {
 			worked = true
 			if err = a.syncDeliveryEvent(ctx, event.EventID, event.ProviderMessageID, event.Status); err != nil {
 				a.logger().Error("sync delivery", "error", err)
-				_ = a.Store.RetryDelivery(ctx, event.EventID, time.Minute)
+				if event.Attempts >= maxAttempts {
+					_ = a.Store.FailDelivery(ctx, event.EventID)
+				} else {
+					_ = a.Store.RetryDelivery(ctx, event.EventID, highLevelRetryDelay(event.Attempts))
+				}
 			}
 		}
 		if !worked {
 			time.Sleep(250 * time.Millisecond)
 		}
 	}
+}
+
+func highLevelRetryDelay(attempt int) time.Duration {
+	return time.Duration(1<<min(attempt, 6)) * time.Minute
 }
 
 func highLevelDeliveryStatus(eventType string, recipients []struct {
@@ -451,6 +468,8 @@ func (a *App) adminStatus(w http.ResponseWriter, r *http.Request) {
 		"failed_outbound":     counts.FailedOutbound,
 		"queued_crm":          counts.QueuedCRM,
 		"failed_crm":          counts.FailedCRM,
+		"failed_inbound":      counts.FailedInbound,
+		"failed_delivery":     counts.FailedDelivery,
 		"suppressions":        counts.Suppressions,
 		"active_enrollments":  counts.ActiveEnrollments,
 		"ready_to_send":       a.EnableSending && !paused && a.FromNumber != "" && len(a.WebhookKey) == ed25519.PublicKeySize,

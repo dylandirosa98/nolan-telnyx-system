@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"example.com/ghl-telnyx-integration/internal/domain"
 )
 
 type Config struct {
@@ -53,6 +55,32 @@ func Load() (Config, error) {
 	c.EnableSending, _ = strconv.ParseBool(os.Getenv("ENABLE_SENDING"))
 	if c.EnableSending && len(c.WebhookKey) != ed25519.PublicKeySize {
 		return c, fmt.Errorf("TELNYX_PUBLIC_KEY is required when ENABLE_SENDING is true")
+	}
+	if c.EnableSending {
+		if c.TelnyxToken == "" {
+			return c, fmt.Errorf("TELNYX_API_KEY is required when ENABLE_SENDING is true")
+		}
+		if c.TelnyxProfileID == "" {
+			return c, fmt.Errorf("TELNYX_MESSAGING_PROFILE_ID is required when ENABLE_SENDING is true")
+		}
+		if err := domain.ValidateE164(c.FromNumber); err != nil {
+			return c, fmt.Errorf("valid TELNYX_FROM_NUMBER is required when ENABLE_SENDING is true")
+		}
+		if c.HighLevelClientID == "" {
+			return c, fmt.Errorf("HIGHLEVEL_CLIENT_ID is required when ENABLE_SENDING is true")
+		}
+		if c.HighLevelClientSecret == "" {
+			return c, fmt.Errorf("HIGHLEVEL_CLIENT_SECRET is required when ENABLE_SENDING is true")
+		}
+		if c.HighLevelRedirectURI == "" {
+			return c, fmt.Errorf("HIGHLEVEL_REDIRECT_URI is required when ENABLE_SENDING is true")
+		}
+		if c.HighLevelLocationID == "" {
+			return c, fmt.Errorf("HIGHLEVEL_LOCATION_ID is required when ENABLE_SENDING is true")
+		}
+		if c.HighLevelConversationProviderID == "" {
+			return c, fmt.Errorf("HIGHLEVEL_CONVERSATION_PROVIDER_ID is required when ENABLE_SENDING is true")
+		}
 	}
 	for _, key := range strings.Split(os.Getenv("ENABLED_WORKFLOWS"), ",") {
 		if key = strings.TrimSpace(key); key != "" {

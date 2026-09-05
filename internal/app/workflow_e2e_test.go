@@ -35,6 +35,11 @@ func TestWorkflowLocalEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This test exercises queue transport, not the wall-clock sending window.
+	// Quiet-hour boundaries are exercised with fixed times in workflow unit tests.
+	definition := definitions["weekly-follow-up"]
+	definition.Window = workflow.SendWindow{StartMinute: 0, EndMinute: 24 * 60}
+	definitions["weekly-follow-up"] = definition
 	publicKey, privateKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)

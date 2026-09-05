@@ -4,9 +4,15 @@ Local, consent-oriented Telnyx-only MVP. It accepts authenticated HighLevel outb
 
 Sending remains disabled by default and in Compose. Do not enable live SMS until Telnyx campaign review, a purchased number, Conversation Provider installation, and a controlled pilot succeed.
 
+## Operator workflow: CSV import then SMS
+
+Staff keep using HighLevel. Upload the opted-in contact CSV in HighLevel (**Contacts → Import**), then text from Conversations, bulk actions, or workflows. Those SMS requests hit this service and go out through Telnyx. Replies show up in HighLevel and the LeadConnector mobile app.
+
+Do not upload CSVs to this service. Contact import, consent records, and campaign selection stay in HighLevel.
+
 ## Local demonstration
 
-Install Go or use the included `golang:1.23-alpine` image. With Docker Compose v2 unavailable, the tested command is `docker-compose up --build`. Health is `GET /healthz`; readiness is `GET /readyz`. Authenticated operator status is `GET /admin/status` with `Authorization: Bearer $ADMIN_TOKEN`.
+Install Go 1.25 or newer, or use the pinned Go 1.26.8 build image in the Dockerfile. With Docker Compose v2 unavailable, the tested command is `docker-compose up --build`. Health is `GET /healthz`; readiness is `GET /readyz`. Authenticated operator status is `GET /admin/status` with `Authorization: Bearer ***
 
 Commands: `make fmt`, `make test`, `make vet`, `make race`, `make build`.
 
@@ -25,3 +31,5 @@ Set `DATABASE_URL` to run the Compose-backed end-to-end tests.
 - Working HighLevel location token (previous credential returned 403).
 - Telnyx campaign `TELNYX_FAILED` corrections, purchased number, and number assignment.
 - Explicit send approval and a controlled live pilot.
+
+Start installation through the authenticated `/oauth/highlevel/start` route. It creates a single-use OAuth state before redirecting to HighLevel; the callback rejects missing, expired, or reused states.

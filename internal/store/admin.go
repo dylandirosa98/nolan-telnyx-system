@@ -15,6 +15,8 @@ type QueueCounts struct {
 	FailedOutbound    int
 	QueuedCRM         int
 	FailedCRM         int
+	FailedInbound     int
+	FailedDelivery    int
 	Suppressions      int
 	ActiveEnrollments int
 	OAuthTokenPresent bool
@@ -45,10 +47,13 @@ func (s *Store) QueueCounts(ctx context.Context, locationID string) (QueueCounts
 			(SELECT count(*) FROM outbound_jobs WHERE status='failed'),
 			(SELECT count(*) FROM crm_jobs WHERE status IN ('queued','running')),
 			(SELECT count(*) FROM crm_jobs WHERE status='failed'),
+			(SELECT count(*) FROM inbound_messages WHERE failed_at IS NOT NULL),
+			(SELECT count(*) FROM delivery_events WHERE failed_at IS NOT NULL),
 			(SELECT count(*) FROM suppressions),
 			(SELECT count(*) FROM workflow_enrollments WHERE state IN ('pending','awaiting_reply'))`).Scan(
 		&counts.QueuedOutbound, &counts.SendingOutbound, &counts.FailedOutbound,
-		&counts.QueuedCRM, &counts.FailedCRM, &counts.Suppressions, &counts.ActiveEnrollments)
+		&counts.QueuedCRM, &counts.FailedCRM, &counts.FailedInbound, &counts.FailedDelivery,
+		&counts.Suppressions, &counts.ActiveEnrollments)
 	if err != nil {
 		return QueueCounts{}, err
 	}

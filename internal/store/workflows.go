@@ -59,18 +59,20 @@ func (s *Store) ClaimDueWorkflow(ctx context.Context) (WorkflowRecord, error) {
 	return scanWorkflowRecord(row)
 }
 
-func (s *Store) ClaimWorkflowsForReply(ctx context.Context, phone string) ([]WorkflowRecord, error) {
+func (s *Store) ClaimWorkflowsForReply(ctx context.Context, phone, fromNumber string) ([]WorkflowRecord, error) {
 	rows, err := s.DB.Query(ctx, `
 		WITH active AS (
 			SELECT id FROM workflow_enrollments
-			WHERE to_number=$1 AND state IN ('pending','awaiting_reply')
+			WHERE to_number=$1
+			  AND ($2='' OR from_number=$2)
+			  AND state IN ('pending','awaiting_reply')
 			  AND (locked_until IS NULL OR locked_until<now())
 			FOR UPDATE SKIP LOCKED
 		)
 		UPDATE workflow_enrollments w SET locked_until=now()+interval '5 minutes',updated_at=now()
 		FROM active WHERE w.id=active.id
 		RETURNING w.id,w.external_id,w.location_id,w.from_number,w.workflow_key,w.contact_id,
-			w.to_number,w.contact_timezone,w.variables,w.consent_at,w.consent_source,w.state,w.next_run_at,w.variant,w.sent_count`, phone)
+			w.to_number,w.contact_timezone,w.variables,w.consent_at,w.consent_source,w.state,w.next_run_at,w.variant,w.sent_count`, phone, fromNumber)
 	if err != nil {
 		return nil, err
 	}

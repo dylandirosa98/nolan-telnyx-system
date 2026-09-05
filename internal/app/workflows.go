@@ -130,8 +130,8 @@ func (a *App) RunWorkflowWorker(ctx context.Context) {
 	}
 }
 
-func (a *App) applyWorkflowReply(ctx context.Context, phone, text string) error {
-	records, err := a.Store.ClaimWorkflowsForReply(ctx, phone)
+func (a *App) applyWorkflowReply(ctx context.Context, phone, fromNumber, text string) error {
+	records, err := a.Store.ClaimWorkflowsForReply(ctx, phone, fromNumber)
 	if err != nil {
 		return err
 	}
