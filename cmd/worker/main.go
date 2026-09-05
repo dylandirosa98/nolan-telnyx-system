@@ -7,6 +7,7 @@ import (
 	"example.com/ghl-telnyx-integration/internal/provider"
 	"example.com/ghl-telnyx-integration/internal/store"
 	"example.com/ghl-telnyx-integration/internal/workflow"
+	"example.com/ghl-telnyx-integration/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	if e = migrations.Apply(context.Background(), db); e != nil {
+		slog.Error("database migrations", "error", e)
+		os.Exit(1)
+	}
 	workflows, e := workflow.EnabledCatalog(c.EnabledWorkflowKeys)
 	if e != nil {
 		slog.Error("workflow configuration", "error", e)

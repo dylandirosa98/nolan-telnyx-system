@@ -9,3 +9,4 @@ RUN adduser -D app
 COPY --from=build /out/api /out/worker /app/
 USER app
 EXPOSE 8080
+CMD ["/app/api"]
