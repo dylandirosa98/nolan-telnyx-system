@@ -55,7 +55,7 @@ func setCompleteSendingEnvironment(t *testing.T) {
 	t.Setenv("TELNYX_FROM_NUMBER", "+12025550101")
 	t.Setenv("HIGHLEVEL_CLIENT_ID", "client-id")
 	t.Setenv("HIGHLEVEL_CLIENT_SECRET", "client-secret")
-	t.Setenv("HIGHLEVEL_REDIRECT_URI", "https://example.test/oauth/highlevel/callback")
+	t.Setenv("HIGHLEVEL_REDIRECT_URI", "https://example.test/oauth/callback")
 	t.Setenv("HIGHLEVEL_LOCATION_ID", "location")
 	t.Setenv("HIGHLEVEL_CONVERSATION_PROVIDER_ID", "provider")
 }

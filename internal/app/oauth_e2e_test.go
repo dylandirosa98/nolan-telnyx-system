@@ -72,12 +72,12 @@ func TestOAuthCallbackAcceptsSingleUseState(t *testing.T) {
 			BaseURL:      oauthServer.URL,
 			ClientID:     "client-id",
 			ClientSecret: "client-secret",
-			RedirectURI:  "https://example.test/oauth/highlevel/callback",
+			RedirectURI:  "https://example.test/oauth/callback",
 			UserType:     "Location",
 			HTTP:         oauthServer.Client(),
 		},
 	}
-	request := httptest.NewRequest(http.MethodGet, "/oauth/highlevel/callback?code=install-code&state="+state, nil)
+	request := httptest.NewRequest(http.MethodGet, "/oauth/callback?code=install-code&state="+state, nil)
 	response := httptest.NewRecorder()
 	application.Routes().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -95,7 +95,7 @@ func TestOAuthCallbackAcceptsSingleUseState(t *testing.T) {
 	}
 
 	reused := httptest.NewRecorder()
-	application.Routes().ServeHTTP(reused, httptest.NewRequest(http.MethodGet, "/oauth/highlevel/callback?code=install-code&state="+state, nil))
+	application.Routes().ServeHTTP(reused, httptest.NewRequest(http.MethodGet, "/oauth/callback?code=install-code&state="+state, nil))
 	if reused.Code != http.StatusUnauthorized {
 		t.Fatalf("reused state status=%d body=%s", reused.Code, reused.Body.String())
 	}
@@ -120,8 +120,8 @@ func TestOAuthCallbackRejectsMissingOrInvalidState(t *testing.T) {
 		OAuth: &provider.OAuthClient{ClientID: "client-id", ClientSecret: "client-secret"},
 	}
 	for name, target := range map[string]string{
-		"missing": "/oauth/highlevel/callback?code=code",
-		"invalid": "/oauth/highlevel/callback?code=code&state=" + strings.Repeat("0", 64),
+		"missing": "/oauth/callback?code=code",
+		"invalid": "/oauth/callback?code=code&state=" + strings.Repeat("0", 64),
 	} {
 		t.Run(name, func(t *testing.T) {
 			response := httptest.NewRecorder()

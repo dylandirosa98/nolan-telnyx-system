@@ -17,7 +17,7 @@ This app lets staff continue using HighLevel and the LeadConnector mobile app no
 
 Add exactly this redirect URL:
 
-`https://api-production-55968.up.railway.app/oauth/highlevel/callback`
+`https://api-production-55968.up.railway.app/oauth/callback`
 
 Select these scopes:
 
@@ -36,7 +36,7 @@ Create a Conversation Provider with:
 
 - Name: `Telnyx SMS`
 - Type: `SMS`
-- Delivery URL: `https://api-production-55968.up.railway.app/webhooks/highlevel/outbound`
+- Delivery URL: `https://api-production-55968.up.railway.app/webhooks/outbound`
 - `Is this a Custom Conversation Provider`: **unchecked**
 
 Leaving the custom-provider option unchecked makes this a replacement for LC Phone/Twilio and preserves support for the normal SMS composer, workflows, bulk actions, and mobile app. Record the generated `conversationProviderId`; it becomes the Railway variable `HIGHLEVEL_CONVERSATION_PROVIDER_ID`.
@@ -45,7 +45,7 @@ Leaving the custom-provider option unchecked makes this a replacement for LC Pho
 
 Do not open the installation URL until the OAuth Client ID and Client Secret have been installed on both Railway application services and the API has been redeployed successfully.
 
-1. Generate the state-bound HighLevel authorization URL through the service's authenticated `/oauth/highlevel/start` route. Do not use a code-only callback.
+1. Generate the state-bound authorization URL through the service's authenticated `/oauth/start` route. Do not use a code-only callback.
 2. The client agency owner/admin opens that URL and selects the intended sub-account.
 3. HighLevel redirects to the configured callback. A successful response says `connected` and includes the selected location ID.
 4. Save that location ID as Railway variable `HIGHLEVEL_LOCATION_ID` on both API and worker services.
