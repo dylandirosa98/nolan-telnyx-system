@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"example.com/ghl-telnyx-integration/internal/provider"
 	"example.com/ghl-telnyx-integration/internal/workflow"
 )
 
@@ -72,6 +74,22 @@ func TestWorkflowEnrollRejectsUnknownLocationAndInvalidPhone(t *testing.T) {
 	a.Routes().ServeHTTP(w, r)
 	if w.Code != 400 {
 		t.Fatalf("invalid phone status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveSendingNumberUsesCSVColumn(t *testing.T) {
+	a := &App{
+		HighLevel:  &provider.FakeHighLevel{FromNumbers: map[string]string{"c1": "8563057016"}},
+		Telnyx:     &provider.FakeTelnyx{Owned: []string{"+18563057016", "+17405552852"}},
+		FromNumber: "+17405552852",
+	}
+	got, err := a.resolveSendingNumber(context.Background(), "c1", a.FromNumber)
+	if err != nil || got != "+18563057016" {
+		t.Fatalf("got %s err %v", got, err)
+	}
+	got, err = a.resolveSendingNumber(context.Background(), "missing", a.FromNumber)
+	if err != nil || got != "+17405552852" {
+		t.Fatalf("blank column got %s err %v", got, err)
 	}
 }
 

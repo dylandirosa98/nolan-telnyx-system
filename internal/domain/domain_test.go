@@ -26,6 +26,24 @@ func TestOptOutKeyword(t *testing.T) {
 	}
 }
 
+func TestSendingNumberUsesCSVColumnWhenItMatchesTelnyx(t *testing.T) {
+	owned := []string{"+18563057016", "+17405552852"}
+	got, err := SelectSendingNumber("856-305-7016", "+17405552852", owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "+18563057016" {
+		t.Fatalf("selected %s", got)
+	}
+	got, err = SelectSendingNumber("", "+17405552852", owned)
+	if err != nil || got != "+17405552852" {
+		t.Fatalf("blank column got %s err %v", got, err)
+	}
+	if _, err = SelectSendingNumber("8563057017", "+17405552852", owned); err == nil {
+		t.Fatal("number that is not a Telnyx number was accepted")
+	}
+}
+
 func TestRetryClassification(t *testing.T) {
 	if ClassifyProviderError(429, "") != RetryTransient {
 		t.Fatal("429 should retry")

@@ -56,6 +56,8 @@ Do not open the installation URL until the OAuth Client ID and Client Secret hav
 
 This connector does not accept CSV files. Import opted-in contacts in HighLevel, then send from Conversations, bulk actions, or workflows. HighLevel calls the Conversation Provider delivery URL for each SMS; this service queues, suppresses STOP numbers, and sends through Telnyx after sending is enabled.
 
+To choose the sending number, add a HighLevel custom field named exactly `SMS From Number` and map a CSV column of that name to it. The value must be a Telnyx number already assigned to the messaging profile and 10DLC campaign. A blank value uses the default number. The workflow SMS step does not pick the number.
+
 ## Acceptance test after Telnyx is ready
 
 1. Verify API health/readiness and that unsigned provider webhooks are rejected.

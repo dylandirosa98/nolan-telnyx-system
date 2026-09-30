@@ -6,9 +6,10 @@ import (
 )
 
 type FakeTelnyx struct {
-	Mu   sync.Mutex
-	Sent []SendRequest
-	Err  error
+	Mu    sync.Mutex
+	Sent  []SendRequest
+	Owned []string
+	Err   error
 }
 
 func (f *FakeTelnyx) Send(_ context.Context, r SendRequest) (SendResult, error) {
@@ -21,13 +22,21 @@ func (f *FakeTelnyx) Send(_ context.Context, r SendRequest) (SendResult, error) 
 	return SendResult{ProviderID: "fake-" + r.IdempotencyKey}, nil
 }
 
+func (f *FakeTelnyx) OwnedNumbers(context.Context) ([]string, error) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return append([]string(nil), f.Owned...), nil
+}
+
 type FakeHighLevel struct {
-	Mu       sync.Mutex
-	Inbound  []Inbound
-	DND      []string
-	Statuses map[string]string
-	CRM      []CRMJob
-	Err      error
+	Mu          sync.Mutex
+	Inbound     []Inbound
+	DND         []string
+	Statuses    map[string]string
+	CRM         []CRMJob
+	Contacts    []ContactHit
+	FromNumbers map[string]string
+	Err         error
 }
 
 func (f *FakeHighLevel) ForwardInbound(_ context.Context, i Inbound) error {
@@ -75,3 +84,21 @@ func (f *FakeHighLevel) ExecuteCRM(_ context.Context, job CRMJob) error {
 type StaticToken string
 
 func (s StaticToken) Token(context.Context) (string, error) { return string(s), nil }
+
+func (f *FakeHighLevel) SearchContacts(_ context.Context, _ string) ([]ContactHit, error) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	return append([]ContactHit(nil), f.Contacts...), nil
+}
+
+func (f *FakeHighLevel) SendingNumber(_ context.Context, contactID string) (string, error) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	return f.FromNumbers[contactID], nil
+}

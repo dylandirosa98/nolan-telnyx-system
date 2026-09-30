@@ -162,6 +162,40 @@ func TestHighLevelClientRefreshesUnauthorizedToken(t *testing.T) {
 	}
 }
 
+func TestHighLevelClientSearchContacts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/contacts/" || r.URL.Query().Get("query") != "pat" || r.URL.Query().Get("locationId") != "loc" {
+			t.Fatalf("path=%s query=%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"contacts": []map[string]string{{"id": "c1", "firstName": "Pat", "lastName": "Lee", "phone": "+13125551212"}}})
+	}))
+	defer server.Close()
+	client := &HighLevelClient{BaseURL: server.URL, Token: "token", LocationID: "loc", HTTP: server.Client()}
+	hits, err := client.SearchContacts(context.Background(), "pat")
+	if err != nil || len(hits) != 1 || hits[0].ID != "c1" || hits[0].Phone != "+13125551212" || hits[0].Name != "Pat Lee" {
+		t.Fatalf("hits=%#v err=%v", hits, err)
+	}
+}
+
+func TestHighLevelClientReadsSMSFromNumberColumn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/locations/loc/customFields":
+			_ = json.NewEncoder(w).Encode(map[string]any{"customFields": []map[string]string{{"id": "field-1", "name": "SMS From Number", "fieldKey": "contact.sms_from_number"}}})
+		case "/contacts/contact-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"contact": map[string]any{"id": "contact-1", "customFields": []map[string]any{{"id": "field-1", "value": "8563057016"}}}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := &HighLevelClient{BaseURL: server.URL, Token: "token", LocationID: "loc", HTTP: server.Client()}
+	got, err := client.SendingNumber(context.Background(), "contact-1")
+	if err != nil || got != "8563057016" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+}
+
 type refreshingToken struct{ current, next string }
 
 func (r refreshingToken) Token(context.Context) (string, error) { return r.current, nil }

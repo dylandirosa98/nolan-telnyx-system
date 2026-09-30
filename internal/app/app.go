@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"example.com/ghl-telnyx-integration/internal/domain"
@@ -20,19 +21,20 @@ import (
 )
 
 type App struct {
-	Store               *store.Store
-	Telnyx              provider.Telnyx
-	HighLevel           provider.HighLevel
-	OAuth               *provider.OAuthClient
-	WebhookKey          ed25519.PublicKey
-	HighLevelWebhookKey ed25519.PublicKey
-	HLSecret            string
-	AdminToken          string
-	LocationID          string
-	FromNumber          string
-	EnableSending       bool
-	Workflows           map[string]workflow.Definition
-	Logger              *slog.Logger
+	Store                                   *store.Store
+	Telnyx                                  provider.Telnyx
+	HighLevel                               provider.HighLevel
+	OAuth                                   *provider.OAuthClient
+	WebhookKey                              ed25519.PublicKey
+	HighLevelWebhookKey                     ed25519.PublicKey
+	HLSecret                                string
+	AdminToken                              string
+	LocationID                              string
+	FromNumber                              string
+	EnableSending                           bool
+	VAPIDPublic, VAPIDPrivate, VAPIDSubject string
+	Workflows                               map[string]workflow.Definition
+	Logger                                  *slog.Logger
 }
 
 func (a *App) Routes() http.Handler {
@@ -129,6 +131,48 @@ func (a *App) highlevel(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) resolveSendingNumber(ctx context.Context, contactID, fallback string) (string, error) {
+	raw := ""
+	if a.HighLevel != nil && contactID != "" {
+		value, err := a.HighLevel.SendingNumber(ctx, contactID)
+		if err != nil {
+			return "", err
+		}
+		raw = value
+	}
+	if strings.TrimSpace(raw) == "" {
+		return fallback, nil
+	}
+	owned := []string{}
+	if a.Telnyx != nil {
+		numbers, err := a.Telnyx.OwnedNumbers(ctx)
+		if err != nil {
+			return "", err
+		}
+		owned = numbers
+	}
+	return domain.SelectSendingNumber(raw, fallback, owned)
+}
+
+func (a *App) acceptsInbound(ctx context.Context, to string) bool {
+	if a.FromNumber == "" || to == a.FromNumber {
+		return true
+	}
+	if a.Telnyx == nil {
+		return false
+	}
+	owned, err := a.Telnyx.OwnedNumbers(ctx)
+	if err != nil {
+		return false
+	}
+	for _, number := range owned {
+		if number == to {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err := webhook.VerifyTelnyx(r, body, a.WebhookKey, time.Now(), 5*time.Minute); err != nil {
@@ -170,7 +214,7 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 		insertedDelivery = inserted
 	}
 	if e.Data.EventType == "message.received" && len(p.To) > 0 {
-		if a.FromNumber != "" && p.To[0].PhoneNumber != a.FromNumber {
+		if !a.acceptsInbound(r.Context(), p.To[0].PhoneNumber) {
 			w.WriteHeader(202)
 			return
 		}
@@ -197,6 +241,7 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if insertedInbound {
+		a.notifyPush(r.Context(), p.From.PhoneNumber, p.Text)
 		if err := a.processInbound(r.Context(), e.Data.ID, p.From.PhoneNumber, p.To[0].PhoneNumber, p.Text); err != nil {
 			a.logger().Error("process inbound", "error", err)
 		}
@@ -274,7 +319,16 @@ func (a *App) RunWorker(ctx context.Context) {
 			_ = a.Store.Fail(ctx, j.ID)
 			continue
 		}
-		res, err := a.Telnyx.Send(ctx, provider.SendRequest{To: j.To, From: j.From, Text: j.Text, IdempotencyKey: j.LocationID + ":" + j.MessageID})
+		from, err := a.resolveSendingNumber(ctx, j.ContactID, j.From)
+		if err != nil {
+			if errors.Is(err, domain.ErrUnknownSendingNumber) {
+				_ = a.Store.Fail(ctx, j.ID)
+			} else {
+				_ = a.Store.Retry(ctx, j.ID, time.Second)
+			}
+			continue
+		}
+		res, err := a.Telnyx.Send(ctx, provider.SendRequest{To: j.To, From: from, Text: j.Text, IdempotencyKey: j.LocationID + ":" + j.MessageID})
 		if err == nil {
 			_ = a.Store.Complete(ctx, j.ID, res.ProviderID)
 			continue

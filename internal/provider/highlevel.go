@@ -126,6 +126,85 @@ func (c *HighLevelClient) createNote(ctx context.Context, contactID, body string
 	return c.doJSON(ctx, http.MethodPost, "/contacts/"+url.PathEscape(contactID)+"/notes", map[string]string{"body": body}, nil)
 }
 
+func (c *HighLevelClient) SearchContacts(ctx context.Context, query string) ([]ContactHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || c.LocationID == "" {
+		return nil, nil
+	}
+	values := url.Values{"locationId": {c.LocationID}, "query": {query}, "limit": {"8"}}
+	var result struct {
+		Contacts []struct {
+			ID, Phone, FirstName, LastName, Name string
+		} `json:"contacts"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/contacts/?"+values.Encode(), nil, &result); err != nil {
+		return nil, err
+	}
+	hits := make([]ContactHit, 0, len(result.Contacts))
+	for _, contact := range result.Contacts {
+		name := strings.TrimSpace(contact.Name)
+		if name == "" {
+			name = strings.TrimSpace(contact.FirstName + " " + contact.LastName)
+		}
+		hits = append(hits, ContactHit{ID: contact.ID, Name: name, Phone: contact.Phone})
+	}
+	return hits, nil
+}
+
+func (c *HighLevelClient) SendingNumber(ctx context.Context, contactID string) (string, error) {
+	contactID = strings.TrimSpace(contactID)
+	if contactID == "" || c.LocationID == "" {
+		return "", nil
+	}
+	var fields struct {
+		CustomFields []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			FieldKey string `json:"fieldKey"`
+		} `json:"customFields"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/locations/"+url.PathEscape(c.LocationID)+"/customFields", nil, &fields); err != nil {
+		return "", err
+	}
+	fieldID := ""
+	for _, field := range fields.CustomFields {
+		if isSendingNumberField(field.Name, field.FieldKey) {
+			fieldID = field.ID
+			break
+		}
+	}
+	if fieldID == "" {
+		return "", nil
+	}
+	var contact struct {
+		Contact struct {
+			CustomFields []struct {
+				ID    string          `json:"id"`
+				Value json.RawMessage `json:"value"`
+			} `json:"customFields"`
+		} `json:"contact"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/contacts/"+url.PathEscape(contactID), nil, &contact); err != nil {
+		return "", err
+	}
+	for _, field := range contact.Contact.CustomFields {
+		if field.ID != fieldID {
+			continue
+		}
+		var value string
+		if json.Unmarshal(field.Value, &value) == nil {
+			return strings.TrimSpace(value), nil
+		}
+	}
+	return "", nil
+}
+
+func isSendingNumberField(name, key string) bool {
+	name = strings.ToLower(strings.Join(strings.Fields(name), " "))
+	key = strings.ToLower(strings.TrimSpace(key))
+	return name == "sms from number" || key == "contact.sms_from_number" || strings.HasSuffix(key, ".sms_from_number")
+}
+
 func (c *HighLevelClient) findContactID(ctx context.Context, phone string) (string, error) {
 	if c.LocationID == "" {
 		return "", fmt.Errorf("HighLevel location id is required")

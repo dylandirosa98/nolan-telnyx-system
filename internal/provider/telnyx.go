@@ -66,4 +66,43 @@ func (c *TelnyxClient) Send(ctx context.Context, r SendRequest) (SendResult, err
 	return SendResult{ProviderID: out.Data.ID}, nil
 }
 
+func (c *TelnyxClient) OwnedNumbers(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v2/messaging_phone_numbers?page[size]=250", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	client := c.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &Error{Status: resp.StatusCode, Code: fmt.Sprint(resp.StatusCode), Message: "Telnyx number lookup failed"}
+	}
+	var payload struct {
+		Data []struct {
+			PhoneNumber        string `json:"phone_number"`
+			MessagingProfileID string `json:"messaging_profile_id"`
+		} `json:"data"`
+	}
+	if err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	numbers := make([]string, 0, len(payload.Data))
+	for _, number := range payload.Data {
+		if c.MessagingProfileID != "" && number.MessagingProfileID != c.MessagingProfileID {
+			continue
+		}
+		if number.PhoneNumber != "" {
+			numbers = append(numbers, number.PhoneNumber)
+		}
+	}
+	return numbers, nil
+}
+
 var _ = time.Second
