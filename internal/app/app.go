@@ -241,7 +241,6 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if insertedInbound {
-		a.notifyPush(r.Context(), p.From.PhoneNumber, p.Text)
 		if err := a.processInbound(r.Context(), e.Data.ID, p.From.PhoneNumber, p.To[0].PhoneNumber, p.Text); err != nil {
 			a.logger().Error("process inbound", "error", err)
 		}
