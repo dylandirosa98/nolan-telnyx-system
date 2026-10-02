@@ -41,6 +41,18 @@ func (s *HighLevelTokenSource) Token(ctx context.Context) (string, error) {
 	return s.ForceRefresh(ctx)
 }
 
+func (s *HighLevelTokenSource) TokenFor(ctx context.Context, locationID string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("HighLevel token source is required")
+	}
+	if locationID == "" || locationID == s.LocationID {
+		return s.Token(ctx)
+	}
+	clone := *s
+	clone.LocationID = locationID
+	return clone.Token(ctx)
+}
+
 func (s *HighLevelTokenSource) ForceRefresh(ctx context.Context) (string, error) {
 	if s.OAuth == nil {
 		if s.Fallback != "" {

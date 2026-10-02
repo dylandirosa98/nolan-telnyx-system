@@ -110,7 +110,7 @@ func (a *App) highlevel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", 400)
 		return
 	}
-	if !a.allowsLocation(p.LocationID) {
+	if !a.allowsLocation(r.Context(), p.LocationID) {
 		http.Error(w, "unknown location", http.StatusForbidden)
 		return
 	}
@@ -132,10 +132,18 @@ func (a *App) highlevel(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *App) resolveSendingNumber(ctx context.Context, contactID, fallback string) (string, error) {
+func (a *App) resolveSendingNumber(ctx context.Context, locationID, contactID, fallback string) (string, error) {
 	raw := ""
 	if a.HighLevel != nil && contactID != "" {
-		value, err := a.HighLevel.SendingNumber(ctx, contactID)
+		var value string
+		var err error
+		if lookup, ok := a.HighLevel.(interface {
+			SendingNumberFor(context.Context, string, string) (string, error)
+		}); ok {
+			value, err = lookup.SendingNumberFor(ctx, locationID, contactID)
+		} else {
+			value, err = a.HighLevel.SendingNumber(ctx, contactID)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -319,7 +327,7 @@ func (a *App) RunWorker(ctx context.Context) {
 			_ = a.Store.Fail(ctx, j.ID)
 			continue
 		}
-		from, err := a.resolveSendingNumber(ctx, j.ContactID, j.From)
+		from, err := a.resolveSendingNumber(ctx, j.LocationID, j.ContactID, j.From)
 		if err != nil {
 			if errors.Is(err, domain.ErrUnknownSendingNumber) {
 				_ = a.Store.Fail(ctx, j.ID)
@@ -567,11 +575,14 @@ func (a *App) adminPage(w http.ResponseWriter, r *http.Request) {
 <p>Process-level ENABLE_SENDING remains the hard safety gate.</p>`))
 }
 
-func (a *App) allowsLocation(id string) bool {
+func (a *App) allowsLocation(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
 	if a.LocationID == "" && len(a.AllowedLocationIDs) == 0 {
 		return true
 	}
-	if id != "" && id == a.LocationID {
+	if id == a.LocationID {
 		return true
 	}
 	for _, allowed := range a.AllowedLocationIDs {
@@ -579,7 +590,11 @@ func (a *App) allowsLocation(id string) bool {
 			return true
 		}
 	}
-	return false
+	if a.Store == nil {
+		return false
+	}
+	_, err := a.Store.LoadOAuthToken(ctx, "highlevel", id)
+	return err == nil
 }
 
 func (a *App) oauthStart(w http.ResponseWriter, r *http.Request) {
@@ -630,10 +645,6 @@ func (a *App) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if locationID == "" {
 		http.Error(w, "oauth response is missing location", 400)
-		return
-	}
-	if !a.allowsLocation(locationID) {
-		http.Error(w, "oauth location does not match this deployment", http.StatusForbidden)
 		return
 	}
 	if err = a.Store.SaveOAuthToken(r.Context(), store.OAuthToken{

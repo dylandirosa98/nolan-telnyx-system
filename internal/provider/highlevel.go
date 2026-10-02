@@ -152,10 +152,16 @@ func (c *HighLevelClient) SearchContacts(ctx context.Context, query string) ([]C
 }
 
 func (c *HighLevelClient) SendingNumber(ctx context.Context, contactID string) (string, error) {
+	return c.SendingNumberFor(ctx, c.LocationID, contactID)
+}
+
+func (c *HighLevelClient) SendingNumberFor(ctx context.Context, locationID, contactID string) (string, error) {
 	contactID = strings.TrimSpace(contactID)
-	if contactID == "" || c.LocationID == "" {
+	locationID = strings.TrimSpace(locationID)
+	if contactID == "" || locationID == "" {
 		return "", nil
 	}
+	client := c.forLocation(locationID)
 	var fields struct {
 		CustomFields []struct {
 			ID       string `json:"id"`
@@ -163,7 +169,7 @@ func (c *HighLevelClient) SendingNumber(ctx context.Context, contactID string) (
 			FieldKey string `json:"fieldKey"`
 		} `json:"customFields"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/locations/"+url.PathEscape(c.LocationID)+"/customFields", nil, &fields); err != nil {
+	if err := client.doJSON(ctx, http.MethodGet, "/locations/"+url.PathEscape(locationID)+"/customFields", nil, &fields); err != nil {
 		return "", err
 	}
 	fieldID := ""
@@ -184,7 +190,7 @@ func (c *HighLevelClient) SendingNumber(ctx context.Context, contactID string) (
 			} `json:"customFields"`
 		} `json:"contact"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/contacts/"+url.PathEscape(contactID), nil, &contact); err != nil {
+	if err := client.doJSON(ctx, http.MethodGet, "/contacts/"+url.PathEscape(contactID), nil, &contact); err != nil {
 		return "", err
 	}
 	for _, field := range contact.Contact.CustomFields {
@@ -197,6 +203,20 @@ func (c *HighLevelClient) SendingNumber(ctx context.Context, contactID string) (
 		}
 	}
 	return "", nil
+}
+
+func (c *HighLevelClient) forLocation(locationID string) *HighLevelClient {
+	if c == nil || locationID == "" || locationID == c.LocationID {
+		return c
+	}
+	clone := *c
+	clone.LocationID = locationID
+	if source, ok := c.Tokens.(*HighLevelTokenSource); ok && source != nil {
+		tokenSource := *source
+		tokenSource.LocationID = locationID
+		clone.Tokens = &tokenSource
+	}
+	return &clone
 }
 
 func isSendingNumberField(name, key string) bool {

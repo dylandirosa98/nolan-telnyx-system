@@ -79,10 +79,10 @@ func TestWorkflowEnrollRejectsUnknownLocationAndInvalidPhone(t *testing.T) {
 
 func TestAllowedLocationIncludesNolanSMS3(t *testing.T) {
 	a := &App{LocationID: "sJrqUGJbC5EwZx12tvwG", AllowedLocationIDs: []string{"sJrqUGJbC5EwZx12tvwG", "93SBBPzXyG32eVt5BD7D"}}
-	if !a.allowsLocation("93SBBPzXyG32eVt5BD7D") || !a.allowsLocation("sJrqUGJbC5EwZx12tvwG") {
+	if !a.allowsLocation(context.Background(), "93SBBPzXyG32eVt5BD7D") || !a.allowsLocation(context.Background(), "sJrqUGJbC5EwZx12tvwG") {
 		t.Fatal("approved locations were rejected")
 	}
-	if a.allowsLocation("other") {
+	if a.allowsLocation(context.Background(), "other") {
 		t.Fatal("unknown location was accepted")
 	}
 }
@@ -93,11 +93,11 @@ func TestResolveSendingNumberUsesCSVColumn(t *testing.T) {
 		Telnyx:     &provider.FakeTelnyx{Owned: []string{"+18563057016", "+17405552852"}},
 		FromNumber: "+17405552852",
 	}
-	got, err := a.resolveSendingNumber(context.Background(), "c1", a.FromNumber)
+	got, err := a.resolveSendingNumber(context.Background(), "loc", "c1", a.FromNumber)
 	if err != nil || got != "+18563057016" {
 		t.Fatalf("got %s err %v", got, err)
 	}
-	got, err = a.resolveSendingNumber(context.Background(), "missing", a.FromNumber)
+	got, err = a.resolveSendingNumber(context.Background(), "loc", "missing", a.FromNumber)
 	if err != nil || got != "+17405552852" {
 		t.Fatalf("blank column got %s err %v", got, err)
 	}
