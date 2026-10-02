@@ -60,7 +60,10 @@ func main() {
 		},
 		OAuth: oauth, WebhookKey: c.WebhookKey, HighLevelWebhookKey: highLevelWebhookKey,
 		HLSecret: c.HighLevelWebhookSecret, AdminToken: c.AdminToken, LocationID: c.HighLevelLocationID,
-		FromNumber: c.FromNumber, EnableSending: c.EnableSending, Workflows: workflows, Logger: slog.Default(),
+		AllowedLocationIDs: c.AllowedLocationIDs,
+		FromNumber:         c.FromNumber, EnableSending: c.EnableSending,
+		VAPIDPublic: c.VAPIDPublic, VAPIDPrivate: c.VAPIDPrivate, VAPIDSubject: c.VAPIDSubject,
+		Workflows: workflows, Logger: slog.Default(),
 	}
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: a.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

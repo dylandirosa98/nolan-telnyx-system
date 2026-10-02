@@ -77,6 +77,16 @@ func TestWorkflowEnrollRejectsUnknownLocationAndInvalidPhone(t *testing.T) {
 	}
 }
 
+func TestAllowedLocationIncludesNolanSMS3(t *testing.T) {
+	a := &App{LocationID: "sJrqUGJbC5EwZx12tvwG", AllowedLocationIDs: []string{"sJrqUGJbC5EwZx12tvwG", "93SBBPzXyG32eVt5BD7D"}}
+	if !a.allowsLocation("93SBBPzXyG32eVt5BD7D") || !a.allowsLocation("sJrqUGJbC5EwZx12tvwG") {
+		t.Fatal("approved locations were rejected")
+	}
+	if a.allowsLocation("other") {
+		t.Fatal("unknown location was accepted")
+	}
+}
+
 func TestResolveSendingNumberUsesCSVColumn(t *testing.T) {
 	a := &App{
 		HighLevel:  &provider.FakeHighLevel{FromNumbers: map[string]string{"c1": "8563057016"}},

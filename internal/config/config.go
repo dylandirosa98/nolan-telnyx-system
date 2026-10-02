@@ -17,9 +17,10 @@ type Config struct {
 	HighLevelToken, HighLevelBaseURL, HighLevelLocationID, HighLevelConversationProviderID string
 	HighLevelWebhookSecret, AdminToken                                                     string
 	HighLevelClientID, HighLevelClientSecret, HighLevelRedirectURI, HighLevelUserType      string
-	EnabledWorkflowKeys                                                                    []string
+	EnabledWorkflowKeys, AllowedLocationIDs                                                []string
 	WebhookKey                                                                             ed25519.PublicKey
 	EnableSending                                                                          bool
+	VAPIDPublic, VAPIDPrivate, VAPIDSubject                                                string
 	Shutdown                                                                               time.Duration
 }
 
@@ -40,6 +41,9 @@ func Load() (Config, error) {
 		HighLevelClientSecret:           os.Getenv("HIGHLEVEL_CLIENT_SECRET"),
 		HighLevelRedirectURI:            os.Getenv("HIGHLEVEL_REDIRECT_URI"),
 		HighLevelUserType:               valueOrDefault("HIGHLEVEL_USER_TYPE", "Location"),
+		VAPIDPublic:                     os.Getenv("VAPID_PUBLIC_KEY"),
+		VAPIDPrivate:                    os.Getenv("VAPID_PRIVATE_KEY"),
+		VAPIDSubject:                    valueOrDefault("VAPID_SUBJECT", "mailto:inbox@localhost"),
 		Shutdown:                        10 * time.Second,
 	}
 	if c.DatabaseURL == "" {
@@ -87,7 +91,22 @@ func Load() (Config, error) {
 			c.EnabledWorkflowKeys = append(c.EnabledWorkflowKeys, key)
 		}
 	}
+	c.AllowedLocationIDs = uniqueIDs(append([]string{c.HighLevelLocationID}, strings.Split(os.Getenv("HIGHLEVEL_ALLOWED_LOCATION_IDS"), ",")...))
 	return c, nil
+}
+
+func uniqueIDs(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func valueOrDefault(key, fallback string) string {

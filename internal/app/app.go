@@ -30,6 +30,7 @@ type App struct {
 	HLSecret                                string
 	AdminToken                              string
 	LocationID                              string
+	AllowedLocationIDs                      []string
 	FromNumber                              string
 	EnableSending                           bool
 	VAPIDPublic, VAPIDPrivate, VAPIDSubject string
@@ -109,7 +110,7 @@ func (a *App) highlevel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", 400)
 		return
 	}
-	if a.LocationID != "" && p.LocationID != a.LocationID {
+	if !a.allowsLocation(p.LocationID) {
 		http.Error(w, "unknown location", http.StatusForbidden)
 		return
 	}
@@ -566,6 +567,21 @@ func (a *App) adminPage(w http.ResponseWriter, r *http.Request) {
 <p>Process-level ENABLE_SENDING remains the hard safety gate.</p>`))
 }
 
+func (a *App) allowsLocation(id string) bool {
+	if a.LocationID == "" && len(a.AllowedLocationIDs) == 0 {
+		return true
+	}
+	if id != "" && id == a.LocationID {
+		return true
+	}
+	for _, allowed := range a.AllowedLocationIDs {
+		if id == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) oauthStart(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
@@ -616,7 +632,7 @@ func (a *App) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oauth response is missing location", 400)
 		return
 	}
-	if a.LocationID != "" && locationID != a.LocationID {
+	if !a.allowsLocation(locationID) {
 		http.Error(w, "oauth location does not match this deployment", http.StatusForbidden)
 		return
 	}
