@@ -136,6 +136,43 @@ type InboundMessage struct {
 	Attempts                int
 }
 
+type UnknownInbound struct {
+	EventID         string `json:"eventId"`
+	SenderNumber    string `json:"senderNumber"`
+	ReceivingNumber string `json:"receivingNumber"`
+	Body            string `json:"body"`
+	ReceivedAt      int64  `json:"receivedAt"`
+}
+
+func (s *Store) RecentUnknownInbound(ctx context.Context, limit int) ([]UnknownInbound, error) {
+	if limit <= 0 || limit > 250 {
+		limit = 250
+	}
+	rows, err := s.DB.Query(ctx, `
+		SELECT i.provider_event_id,i.from_number,i.to_number,i.body,
+			(EXTRACT(EPOCH FROM i.created_at)*1000)::bigint
+		FROM inbound_messages i
+		WHERE NOT EXISTS (
+			SELECT 1 FROM outbound_jobs o
+			WHERE o.to_number=i.from_number AND o.created_at<=i.created_at
+		)
+		ORDER BY i.created_at DESC,i.provider_event_id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	messages := make([]UnknownInbound, 0, limit)
+	for rows.Next() {
+		var message UnknownInbound
+		if err = rows.Scan(&message.EventID, &message.SenderNumber, &message.ReceivingNumber, &message.Body, &message.ReceivedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
 func (s *Store) ClaimUnprocessedInbound(ctx context.Context) (InboundMessage, error) {
 	var msg InboundMessage
 	err := s.DB.QueryRow(ctx, `

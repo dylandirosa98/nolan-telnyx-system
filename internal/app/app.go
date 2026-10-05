@@ -65,7 +65,29 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("/oauth/highlevel/start", a.oauthStart)
 	m.HandleFunc("/oauth/highlevel/callback", a.oauthCallback)
 	m.HandleFunc("/signal-desk/conversations", a.signalDeskConversations)
+	m.HandleFunc("/signal-desk/unknown", a.signalDeskUnknown)
 	return m
+}
+
+func (a *App) signalDeskUnknown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	secret := a.signalDeskSecret()
+	if secret == "" || !bearerSecretOK(r.Header.Get("Authorization"), secret) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	messages, err := a.Store.RecentUnknownInbound(r.Context(), 250)
+	if err != nil {
+		a.logger().Error("load unknown inbound messages", "error", err)
+		http.Error(w, "messages unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"messages": messages})
 }
 
 func (a *App) signalDeskConversations(w http.ResponseWriter, r *http.Request) {
