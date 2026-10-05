@@ -48,6 +48,23 @@ func TestSignalDeskConversationsRequireTokenAndAllowedLocation(t *testing.T) {
 	}
 }
 
+func TestSignalDeskUsesAdminDerivedSecretWhenDedicatedTokenIsUnset(t *testing.T) {
+	a := &App{AdminToken: "admin-secret", AllowedLocationIDs: []string{"loc-allowed"}, HighLevel: &provider.FakeHighLevel{}}
+	if a.signalDeskSecret() == "" || a.signalDeskSecret() == a.AdminToken {
+		t.Fatal("expected a distinct derived Signal Desk secret")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/signal-desk/conversations?location_id=loc-allowed", nil)
+	req.Header.Set("Authorization", "Bearer "+a.signalDeskSecret())
+	w := httptest.NewRecorder()
+	a.Routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(a.signalDeskWebhookURL(), "token=") {
+		t.Fatal("expected fallback webhook URL with derived token")
+	}
+}
+
 func TestHighLevelOutboundRejectsUnknownLocation(t *testing.T) {
 	a := &App{HLSecret: "test-secret", LocationID: "loc-allowed", FromNumber: "+13125551212"}
 	body, _ := json.Marshal(map[string]any{

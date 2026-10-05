@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,8 @@ import (
 	"example.com/ghl-telnyx-integration/internal/workflow"
 	"github.com/jackc/pgx/v5"
 )
+
+const defaultSignalDeskWebhookURL = "https://signal-desk-inbox.chillindylan.chatgpt.site/api/telnyx"
 
 type App struct {
 	Store                                   *store.Store
@@ -69,7 +73,8 @@ func (a *App) signalDeskConversations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if a.SignalDeskToken == "" || !bearerSecretOK(r.Header.Get("Authorization"), a.SignalDeskToken) {
+	secret := a.signalDeskSecret()
+	if secret == "" || !bearerSecretOK(r.Header.Get("Authorization"), secret) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -284,17 +289,17 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 			a.logger().Error("process inbound", "error", err)
 		}
 	}
-	if a.SignalDeskWebhookURL != "" && r.Header.Get("x-signal-desk-forwarded") == "" {
+	if webhookURL := a.signalDeskWebhookURL(); webhookURL != "" && r.Header.Get("x-signal-desk-forwarded") == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := a.forwardSignalDesk(ctx, r, body); err != nil {
+		if err := a.forwardSignalDesk(ctx, r, body, webhookURL); err != nil {
 			a.logger().Error("forward Signal Desk webhook", "error", err)
 		}
 	}
 }
 
-func (a *App) forwardSignalDesk(ctx context.Context, source *http.Request, body []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.SignalDeskWebhookURL, strings.NewReader(string(body)))
+func (a *App) forwardSignalDesk(ctx context.Context, source *http.Request, body []byte, webhookURL string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, strings.NewReader(string(body)))
 	if err != nil {
 		return err
 	}
@@ -319,6 +324,36 @@ func (a *App) forwardSignalDesk(ctx context.Context, source *http.Request, body 
 		return fmt.Errorf("Signal Desk webhook returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (a *App) signalDeskSecret() string {
+	if a.SignalDeskToken != "" {
+		return a.SignalDeskToken
+	}
+	if a.AdminToken == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(a.AdminToken))
+	_, _ = mac.Write([]byte("signal-desk-v1"))
+	return fmt.Sprintf("%x", mac.Sum(nil))
+}
+
+func (a *App) signalDeskWebhookURL() string {
+	if a.SignalDeskWebhookURL != "" {
+		return a.SignalDeskWebhookURL
+	}
+	secret := a.signalDeskSecret()
+	if secret == "" {
+		return ""
+	}
+	target, err := url.Parse(defaultSignalDeskWebhookURL)
+	if err != nil {
+		return ""
+	}
+	query := target.Query()
+	query.Set("token", secret)
+	target.RawQuery = query.Encode()
+	return target.String()
 }
 
 func (a *App) processInbound(ctx context.Context, eventID, from, to, text string) error {
