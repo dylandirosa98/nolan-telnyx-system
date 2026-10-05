@@ -79,7 +79,7 @@ func (a *App) signalDeskUnknown(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	messages, err := a.Store.RecentUnknownInbound(r.Context(), 250)
+	messages, err := a.Store.RecentUnknownInbound(r.Context(), 20)
 	if err != nil {
 		a.logger().Error("load unknown inbound messages", "error", err)
 		http.Error(w, "messages unavailable", http.StatusInternalServerError)
