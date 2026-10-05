@@ -349,15 +349,12 @@ func (a *App) forwardSignalDesk(ctx context.Context, source *http.Request, body 
 }
 
 func (a *App) signalDeskSecret() string {
-	if a.SignalDeskToken != "" {
-		return a.SignalDeskToken
+	if a.AdminToken != "" {
+		mac := hmac.New(sha256.New, []byte(a.AdminToken))
+		_, _ = mac.Write([]byte("signal-desk-v1"))
+		return fmt.Sprintf("%x", mac.Sum(nil))
 	}
-	if a.AdminToken == "" {
-		return ""
-	}
-	mac := hmac.New(sha256.New, []byte(a.AdminToken))
-	_, _ = mac.Write([]byte("signal-desk-v1"))
-	return fmt.Sprintf("%x", mac.Sum(nil))
+	return a.SignalDeskToken
 }
 
 func (a *App) signalDeskWebhookURL() string {
