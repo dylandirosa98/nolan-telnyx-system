@@ -69,7 +69,76 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("/signal-desk/conversations", a.signalDeskConversations)
 	m.HandleFunc("/signal-desk/unknown", a.signalDeskUnknown)
 	m.HandleFunc("/signal-desk/voice/token", a.signalDeskVoiceToken)
+	m.HandleFunc("/signal-desk/voice/status", a.signalDeskVoiceStatus)
 	return m
+}
+
+func (a *App) signalDeskVoiceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	secret := a.signalDeskSecret()
+	if secret == "" || !bearerSecretOK(r.Header.Get("Authorization"), secret) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	telnyx, ok := a.Telnyx.(*provider.TelnyxClient)
+	if !ok || telnyx.Token == "" {
+		http.Error(w, "Telnyx access is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	baseURL := strings.TrimRight(telnyx.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://api.telnyx.com"
+	}
+	result := map[string]any{"configuredCredentialId": a.TelnyxVoiceCredentialID}
+	for key, path := range map[string]string{
+		"connections":           "/v2/credential_connections?page[size]=100",
+		"credentials":           "/v2/telephony_credentials?page[size]=100",
+		"outboundVoiceProfiles": "/v2/outbound_voice_profiles?page[size]=100",
+	} {
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, baseURL+path, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+telnyx.Token)
+		client := a.HTTP
+		if client == nil {
+			client = http.DefaultClient
+		}
+		response, err := client.Do(req)
+		if err != nil {
+			result[key+"Status"] = http.StatusBadGateway
+			continue
+		}
+		var payload struct {
+			Data []map[string]any `json:"data"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload)
+		response.Body.Close()
+		result[key+"Status"] = response.StatusCode
+		if decodeErr == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
+			items := make([]map[string]any, 0, len(payload.Data))
+			for _, item := range payload.Data {
+				items = append(items, map[string]any{
+					"id": item["id"], "name": firstNonNil(item["connection_name"], item["name"], item["username"]),
+					"connectionId": item["connection_id"], "active": item["active"],
+				})
+			}
+			result[key] = items
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func firstNonNil(values ...any) string {
+	for _, value := range values {
+		if text, ok := value.(string); ok && text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func (a *App) signalDeskVoiceToken(w http.ResponseWriter, r *http.Request) {
