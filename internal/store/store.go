@@ -153,6 +153,7 @@ func (s *Store) RecentUnknownInbound(ctx context.Context, limit int) ([]UnknownI
 			(EXTRACT(EPOCH FROM i.created_at)*1000)::bigint
 		FROM inbound_messages i
 		WHERE i.created_at >= TIMESTAMPTZ '2026-10-04 00:00:00 America/Detroit'
+		AND i.signal_desk_resolved_at IS NULL
 		AND NOT EXISTS (
 			SELECT 1 FROM outbound_jobs o
 			WHERE o.to_number=i.from_number AND o.created_at<=i.created_at
@@ -172,6 +173,11 @@ func (s *Store) RecentUnknownInbound(ctx context.Context, limit int) ([]UnknownI
 		messages = append(messages, message)
 	}
 	return messages, rows.Err()
+}
+
+func (s *Store) ResolveSignalDeskInbound(ctx context.Context, eventID string) error {
+	_, err := s.DB.Exec(ctx, `UPDATE inbound_messages SET signal_desk_resolved_at=now() WHERE provider_event_id=$1`, eventID)
+	return err
 }
 
 func (s *Store) ClaimUnprocessedInbound(ctx context.Context) (InboundMessage, error) {

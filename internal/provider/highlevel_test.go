@@ -44,6 +44,43 @@ func TestHighLevelClientForwardsInboundIntoConversation(t *testing.T) {
 	}
 }
 
+func TestHighLevelClientPromotesUnknownSenderByCreatingContact(t *testing.T) {
+	var contactBody, inbound map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/contacts/search/duplicate":
+			_ = json.NewEncoder(w).Encode(map[string]any{"contact": map[string]string{}})
+		case "/contacts/":
+			_ = json.NewDecoder(r.Body).Decode(&contactBody)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"contact": map[string]string{"id": "new-contact"}})
+		case "/conversations/search":
+			_ = json.NewEncoder(w).Encode(map[string]any{"conversations": []any{}})
+		case "/conversations/":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"conversation": map[string]string{"id": "new-conversation"}})
+		case "/conversations/messages/inbound":
+			_ = json.NewDecoder(r.Body).Decode(&inbound)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &HighLevelClient{BaseURL: server.URL, Token: "token", LocationID: "primary", HTTP: server.Client()}
+	err := client.PromoteInbound(context.Background(), Inbound{LocationID: "loc-2", From: "+13125551212", To: "+17405552852", Text: "hello", ProviderEventID: "event"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contactBody["locationId"] != "loc-2" || contactBody["phone"] != "+13125551212" {
+		t.Fatalf("contact=%#v", contactBody)
+	}
+	if inbound["contactId"] != "new-contact" || inbound["conversationId"] != "new-conversation" || inbound["message"] != "hello" {
+		t.Fatalf("inbound=%#v", inbound)
+	}
+}
+
 func TestHighLevelClientSetsSMSDND(t *testing.T) {
 	var update map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

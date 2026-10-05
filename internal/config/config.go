@@ -13,16 +13,16 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, TelnyxBaseURL, TelnyxToken, TelnyxProfileID, FromNumber                   string
-	HighLevelToken, HighLevelBaseURL, HighLevelLocationID, HighLevelConversationProviderID string
-	HighLevelWebhookSecret, AdminToken                                                     string
-	SignalDeskToken, SignalDeskWebhookURL                                                  string
-	HighLevelClientID, HighLevelClientSecret, HighLevelRedirectURI, HighLevelUserType      string
-	EnabledWorkflowKeys, AllowedLocationIDs                                                []string
-	WebhookKey                                                                             ed25519.PublicKey
-	EnableSending                                                                          bool
-	VAPIDPublic, VAPIDPrivate, VAPIDSubject                                                string
-	Shutdown                                                                               time.Duration
+	DatabaseURL, TelnyxBaseURL, TelnyxToken, TelnyxProfileID, TelnyxVoiceCredentialID, FromNumber string
+	HighLevelToken, HighLevelBaseURL, HighLevelLocationID, HighLevelConversationProviderID        string
+	HighLevelWebhookSecret, AdminToken                                                            string
+	SignalDeskToken, SignalDeskWebhookURL                                                         string
+	HighLevelClientID, HighLevelClientSecret, HighLevelRedirectURI, HighLevelUserType             string
+	EnabledWorkflowKeys, AllowedLocationIDs                                                       []string
+	WebhookKey                                                                                    ed25519.PublicKey
+	EnableSending                                                                                 bool
+	VAPIDPublic, VAPIDPrivate, VAPIDSubject                                                       string
+	Shutdown                                                                                      time.Duration
 }
 
 func Load() (Config, error) {
@@ -31,6 +31,7 @@ func Load() (Config, error) {
 		TelnyxBaseURL:                   valueOrDefault("TELNYX_BASE_URL", "https://api.telnyx.com"),
 		TelnyxToken:                     os.Getenv("TELNYX_API_KEY"),
 		TelnyxProfileID:                 os.Getenv("TELNYX_MESSAGING_PROFILE_ID"),
+		TelnyxVoiceCredentialID:         os.Getenv("TELNYX_VOICE_CREDENTIAL_ID"),
 		FromNumber:                      os.Getenv("TELNYX_FROM_NUMBER"),
 		HighLevelToken:                  os.Getenv("HIGHLEVEL_TOKEN"),
 		HighLevelBaseURL:                valueOrDefault("HIGHLEVEL_BASE_URL", "https://services.leadconnectorhq.com"),

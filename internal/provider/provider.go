@@ -36,6 +36,7 @@ type ConversationMessage struct {
 }
 
 type Conversation struct {
+	ContactID     string                `json:"-"`
 	ContactNumber string                `json:"contactNumber"`
 	TelnyxNumber  string                `json:"telnyxNumber"`
 	LastBody      string                `json:"lastBody"`
@@ -47,6 +48,7 @@ type Conversation struct {
 
 type HighLevel interface {
 	ForwardInbound(context.Context, Inbound) error
+	PromoteInbound(context.Context, Inbound) error
 	SetSMSDND(context.Context, string) error
 	UpdateMessageStatus(context.Context, string, string) error
 	ExecuteCRM(context.Context, CRMJob) error

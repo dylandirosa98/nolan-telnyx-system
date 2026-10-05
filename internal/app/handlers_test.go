@@ -18,7 +18,7 @@ import (
 )
 
 func TestSignalDeskConversationsRequireTokenAndAllowedLocation(t *testing.T) {
-	conversation := provider.Conversation{ContactNumber: "+13125551212", LastBody: "hello", LastDirection: "inbound", LastAt: 1}
+	conversation := provider.Conversation{ContactNumber: "+13125551212", LastBody: "hello", LastDirection: "inbound", LastAt: time.Now().UnixMilli()}
 	a := &App{
 		SignalDeskToken:    "desk-secret",
 		AllowedLocationIDs: []string{"loc-allowed"},
@@ -45,6 +45,74 @@ func TestSignalDeskConversationsRequireTokenAndAllowedLocation(t *testing.T) {
 	a.Routes().ServeHTTP(blockedResponse, blocked)
 	if blockedResponse.Code != http.StatusForbidden {
 		t.Fatalf("blocked status=%d", blockedResponse.Code)
+	}
+}
+
+func TestSignalDeskConversationsAcceptWindowAndLimit(t *testing.T) {
+	fake := &provider.FakeHighLevel{Conversations: []provider.Conversation{
+		{ContactNumber: "+13125550001", LastAt: time.Now().Add(-time.Hour).UnixMilli()},
+		{ContactNumber: "+13125550002", LastAt: time.Now().Add(-72 * time.Hour).UnixMilli()},
+	}}
+	a := &App{SignalDeskToken: "desk-secret", AllowedLocationIDs: []string{"loc"}, HighLevel: fake}
+	req := httptest.NewRequest(http.MethodGet, "/signal-desk/conversations?location_id=loc&limit=50&days=2", nil)
+	req.Header.Set("Authorization", "Bearer desk-secret")
+	w := httptest.NewRecorder()
+	a.Routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "+13125550001") || strings.Contains(w.Body.String(), "+13125550002") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if fake.LastConversationLimit != 50 {
+		t.Fatalf("limit=%d", fake.LastConversationLimit)
+	}
+}
+
+func TestSignalDeskMoveCreatesHighLevelConversation(t *testing.T) {
+	fake := &provider.FakeHighLevel{}
+	a := &App{SignalDeskToken: "desk-secret", AllowedLocationIDs: []string{"loc"}, HighLevel: fake}
+	body := strings.NewReader(`{"event_id":"evt-1","location_id":"loc","from":"+13125551212","to":"+17405552852","text":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/signal-desk/conversations", body)
+	req.Header.Set("Authorization", "Bearer desk-secret")
+	w := httptest.NewRecorder()
+	a.Routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || len(fake.Promoted) != 1 {
+		t.Fatalf("status=%d body=%s promoted=%#v", w.Code, w.Body.String(), fake.Promoted)
+	}
+	if fake.Promoted[0].LocationID != "loc" || fake.Promoted[0].ProviderEventID != "evt-1" {
+		t.Fatalf("promoted=%#v", fake.Promoted[0])
+	}
+}
+
+func TestSignalDeskVoiceTokenRequiresConfiguredCredential(t *testing.T) {
+	a := &App{SignalDeskToken: "desk-secret"}
+	req := httptest.NewRequest(http.MethodPost, "/signal-desk/voice/token", nil)
+	req.Header.Set("Authorization", "Bearer desk-secret")
+	w := httptest.NewRecorder()
+	a.Routes().ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "not been connected") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestSignalDeskVoiceTokenComesFromTelnyx(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/telephony_credentials/credential/token" || r.Header.Get("Authorization") != "Bearer api-key" {
+			t.Fatalf("request=%s auth=%s", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": "voice-token"})
+	}))
+	defer server.Close()
+	a := &App{
+		SignalDeskToken:         "desk-secret",
+		TelnyxVoiceCredentialID: "credential",
+		Telnyx:                  &provider.TelnyxClient{BaseURL: server.URL, Token: "api-key"},
+		HTTP:                    server.Client(),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/signal-desk/voice/token", nil)
+	req.Header.Set("Authorization", "Bearer desk-secret")
+	w := httptest.NewRecorder()
+	a.Routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "voice-token") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

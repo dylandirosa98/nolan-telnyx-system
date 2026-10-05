@@ -19,7 +19,23 @@ type HighLevelClient struct {
 	Tokens                 Tokens
 	LocationID             string
 	ConversationProviderID string
+	DefaultFromNumber      string
 	HTTP                   *http.Client
+}
+
+func (c *HighLevelClient) PromoteInbound(ctx context.Context, inbound Inbound) error {
+	locationID := strings.TrimSpace(inbound.LocationID)
+	if locationID == "" {
+		return fmt.Errorf("HighLevel location id is required")
+	}
+	client := c.forLocation(locationID)
+	contactID, err := client.findOrCreateContact(ctx, inbound.From)
+	if err != nil {
+		return err
+	}
+	inbound.ContactID = contactID
+	inbound.LocationID = locationID
+	return client.ForwardInbound(ctx, inbound)
 }
 
 func (c *HighLevelClient) ForwardInbound(ctx context.Context, inbound Inbound) error {
@@ -157,7 +173,7 @@ func (c *HighLevelClient) RecentConversations(ctx context.Context, locationID st
 	if locationID == "" {
 		return nil, fmt.Errorf("HighLevel location id is required")
 	}
-	if limit <= 0 || limit > 20 {
+	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	client := c.forLocation(locationID)
@@ -199,6 +215,7 @@ func (c *HighLevelClient) RecentConversations(ctx context.Context, locationID st
 		}
 
 		conversation := Conversation{
+			ContactID:     summary.ContactID,
 			ContactNumber: summary.Phone,
 			LastBody:      summary.LastMessageBody,
 			LastDirection: strings.ToLower(summary.LastMessageDirection),
@@ -237,9 +254,32 @@ func (c *HighLevelClient) RecentConversations(ctx context.Context, locationID st
 		if conversation.LastDirection != "outbound" {
 			conversation.LastDirection = "inbound"
 		}
+		if !isE164(conversation.TelnyxNumber) {
+			conversation.TelnyxNumber = ""
+			if summary.ContactID != "" {
+				if from, lookupErr := client.SendingNumberFor(ctx, locationID, summary.ContactID); lookupErr == nil && isE164(from) {
+					conversation.TelnyxNumber = from
+				}
+			}
+			if conversation.TelnyxNumber == "" && isE164(client.DefaultFromNumber) {
+				conversation.TelnyxNumber = client.DefaultFromNumber
+			}
+		}
 		result = append(result, conversation)
 	}
 	return result, nil
+}
+
+func isE164(value string) bool {
+	if len(value) < 8 || len(value) > 16 || value[0] != '+' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func providerTime(raw json.RawMessage) int64 {
@@ -361,6 +401,33 @@ func (c *HighLevelClient) findContactID(ctx context.Context, phone string) (stri
 		return "", fmt.Errorf("HighLevel contact not found for phone")
 	}
 	return result.Contact.ID, nil
+}
+
+func (c *HighLevelClient) findOrCreateContact(ctx context.Context, phone string) (string, error) {
+	contactID, err := c.findContactID(ctx, phone)
+	if err == nil {
+		return contactID, nil
+	}
+	if providerErr, ok := err.(*Error); ok {
+		return "", providerErr
+	}
+	var created struct {
+		Contact struct {
+			ID string `json:"id"`
+		} `json:"contact"`
+		ID string `json:"id"`
+	}
+	body := map[string]string{"locationId": c.LocationID, "phone": phone}
+	if err = c.doJSON(ctx, http.MethodPost, "/contacts/", body, &created); err != nil {
+		return "", err
+	}
+	if created.Contact.ID != "" {
+		return created.Contact.ID, nil
+	}
+	if created.ID != "" {
+		return created.ID, nil
+	}
+	return "", fmt.Errorf("HighLevel create contact response is missing id")
 }
 
 func (c *HighLevelClient) findOrCreateConversation(ctx context.Context, contactID string) (string, error) {

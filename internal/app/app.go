@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ type App struct {
 	LocationID                              string
 	AllowedLocationIDs                      []string
 	FromNumber                              string
+	TelnyxVoiceCredentialID                 string
 	EnableSending                           bool
 	VAPIDPublic, VAPIDPrivate, VAPIDSubject string
 	Workflows                               map[string]workflow.Definition
@@ -66,7 +68,54 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("/oauth/highlevel/callback", a.oauthCallback)
 	m.HandleFunc("/signal-desk/conversations", a.signalDeskConversations)
 	m.HandleFunc("/signal-desk/unknown", a.signalDeskUnknown)
+	m.HandleFunc("/signal-desk/voice/token", a.signalDeskVoiceToken)
 	return m
+}
+
+func (a *App) signalDeskVoiceToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	secret := a.signalDeskSecret()
+	if secret == "" || !bearerSecretOK(r.Header.Get("Authorization"), secret) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if a.TelnyxVoiceCredentialID == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Voice calling has not been connected yet."})
+		return
+	}
+	baseURL := "https://api.telnyx.com"
+	if telnyx, ok := a.Telnyx.(*provider.TelnyxClient); ok && telnyx.BaseURL != "" {
+		baseURL = strings.TrimRight(telnyx.BaseURL, "/")
+	}
+	target := baseURL + "/v2/telephony_credentials/" + url.PathEscape(a.TelnyxVoiceCredentialID) + "/token"
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, nil)
+	if err != nil {
+		http.Error(w, "voice token unavailable", http.StatusBadGateway)
+		return
+	}
+	if telnyx, ok := a.Telnyx.(*provider.TelnyxClient); ok {
+		req.Header.Set("Authorization", "Bearer "+telnyx.Token)
+	}
+	client := a.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "voice token unavailable", http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Telnyx could not create a call token."})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(payload)
 }
 
 func (a *App) signalDeskUnknown(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +140,7 @@ func (a *App) signalDeskUnknown(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) signalDeskConversations(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -100,20 +149,66 @@ func (a *App) signalDeskConversations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if r.Method == http.MethodPost {
+		var body struct {
+			EventID    string `json:"event_id"`
+			LocationID string `json:"location_id"`
+			From       string `json:"from"`
+			To         string `json:"to"`
+			Text       string `json:"text"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body) != nil || body.EventID == "" || body.LocationID == "" || domain.ValidateE164(body.From) != nil || domain.ValidateE164(body.To) != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if !a.allowsLocation(r.Context(), body.LocationID) {
+			http.Error(w, "unknown location", http.StatusForbidden)
+			return
+		}
+		if err := a.HighLevel.PromoteInbound(r.Context(), provider.Inbound{LocationID: body.LocationID, From: body.From, To: body.To, Text: body.Text, ProviderEventID: body.EventID}); err != nil {
+			a.logger().Error("move Signal Desk message to HighLevel", "location_id", body.LocationID, "error", err)
+			http.Error(w, "conversation could not be created", http.StatusBadGateway)
+			return
+		}
+		if a.Store != nil {
+			if err := a.Store.ResolveSignalDeskInbound(r.Context(), body.EventID); err != nil {
+				a.logger().Error("resolve Signal Desk message", "error", err)
+				http.Error(w, "message was moved but could not be removed from the unknown inbox", http.StatusInternalServerError)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+		return
+	}
 	locationID := strings.TrimSpace(r.URL.Query().Get("location_id"))
 	if !a.allowsLocation(r.Context(), locationID) {
 		http.Error(w, "unknown location", http.StatusForbidden)
 		return
 	}
-	conversations, err := a.HighLevel.RecentConversations(r.Context(), locationID, 20)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit != 50 && limit != 100 {
+		limit = 20
+	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days != 1 && days != 7 {
+		days = 2
+	}
+	conversations, err := a.HighLevel.RecentConversations(r.Context(), locationID, limit)
 	if err != nil {
 		a.logger().Error("load HighLevel conversations", "location_id", locationID, "error", err)
 		http.Error(w, "conversations unavailable", http.StatusBadGateway)
 		return
 	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
+	filtered := conversations[:0]
+	for _, conversation := range conversations {
+		if conversation.LastAt >= cutoff {
+			filtered = append(filtered, conversation)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"conversations": conversations})
+	_ = json.NewEncoder(w).Encode(map[string]any{"conversations": filtered})
 }
 
 func (a *App) ready(w http.ResponseWriter, r *http.Request) {
