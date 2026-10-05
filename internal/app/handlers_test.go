@@ -95,10 +95,10 @@ func TestSignalDeskVoiceTokenRequiresConfiguredCredential(t *testing.T) {
 
 func TestSignalDeskVoiceTokenComesFromTelnyx(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/telephony_credentials/credential/token" || r.Header.Get("Authorization") != "Bearer api-key" {
-			t.Fatalf("request=%s auth=%s", r.URL.Path, r.Header.Get("Authorization"))
+		if r.URL.Path != "/v2/telephony_credentials/credential/token" || r.Header.Get("Authorization") != "Bearer api-key" || r.Header.Get("Accept") != "text/plain" {
+			t.Fatalf("request=%s auth=%s accept=%s", r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("Accept"))
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": "voice-token"})
+		_, _ = w.Write([]byte("voice-token"))
 	}))
 	defer server.Close()
 	a := &App{
@@ -111,8 +111,64 @@ func TestSignalDeskVoiceTokenComesFromTelnyx(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer desk-secret")
 	w := httptest.NewRecorder()
 	a.Routes().ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "voice-token") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"data":"voice-token"`) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestSignalDeskVoiceProvisionCreatesMissingResourcesAndBecomesIdempotent(t *testing.T) {
+	profiles := []telnyxResource{}
+	connections := []telnyxResource{}
+	credentials := []telnyxResource{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			switch r.URL.Path {
+			case "/v2/outbound_voice_profiles":
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": profiles})
+			case "/v2/credential_connections":
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": connections})
+			case "/v2/telephony_credentials":
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": credentials})
+			default:
+				http.NotFound(w, r)
+			}
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		switch r.URL.Path {
+		case "/v2/outbound_voice_profiles":
+			profiles = append(profiles, telnyxResource{ID: "profile-1", Name: signalDeskVoiceProfileName})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": profiles[0]})
+		case "/v2/credential_connections":
+			connections = append(connections, telnyxResource{ID: "connection-1", ConnectionName: signalDeskVoiceConnectionName})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": connections[0]})
+		case "/v2/telephony_credentials":
+			credentials = append(credentials, telnyxResource{ID: "credential-1", Name: signalDeskVoiceCredentialName})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": credentials[0]})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	a := &App{
+		SignalDeskToken: "desk-secret",
+		Telnyx:          &provider.TelnyxClient{BaseURL: server.URL, Token: "api-key"},
+		HTTP:            server.Client(),
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/signal-desk/voice/provision", nil)
+		req.Header.Set("Authorization", "Bearer desk-secret")
+		w := httptest.NewRecorder()
+		a.Routes().ServeHTTP(w, req)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "credential-1") {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt, w.Code, w.Body.String())
+		}
+	}
+	if len(profiles) != 1 || len(connections) != 1 || len(credentials) != 1 {
+		t.Fatalf("profiles=%d connections=%d credentials=%d", len(profiles), len(connections), len(credentials))
 	}
 }
 

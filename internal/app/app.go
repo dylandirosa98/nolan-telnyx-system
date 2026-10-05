@@ -70,6 +70,7 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("/signal-desk/unknown", a.signalDeskUnknown)
 	m.HandleFunc("/signal-desk/voice/token", a.signalDeskVoiceToken)
 	m.HandleFunc("/signal-desk/voice/status", a.signalDeskVoiceStatus)
+	m.HandleFunc("/signal-desk/voice/provision", a.signalDeskVoiceProvision)
 	return m
 }
 
@@ -92,7 +93,8 @@ func (a *App) signalDeskVoiceStatus(w http.ResponseWriter, r *http.Request) {
 	if baseURL == "" {
 		baseURL = "https://api.telnyx.com"
 	}
-	result := map[string]any{"configuredCredentialId": a.TelnyxVoiceCredentialID}
+	credentialID, _ := a.voiceCredentialID(r.Context())
+	result := map[string]any{"configuredCredentialId": credentialID}
 	for key, path := range map[string]string{
 		"connections":           "/v2/credential_connections?page[size]=100",
 		"credentials":           "/v2/telephony_credentials?page[size]=100",
@@ -151,7 +153,8 @@ func (a *App) signalDeskVoiceToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if a.TelnyxVoiceCredentialID == "" {
+	credentialID, err := a.voiceCredentialID(r.Context())
+	if err != nil || credentialID == "" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Voice calling has not been connected yet."})
 		return
 	}
@@ -159,7 +162,7 @@ func (a *App) signalDeskVoiceToken(w http.ResponseWriter, r *http.Request) {
 	if telnyx, ok := a.Telnyx.(*provider.TelnyxClient); ok && telnyx.BaseURL != "" {
 		baseURL = strings.TrimRight(telnyx.BaseURL, "/")
 	}
-	target := baseURL + "/v2/telephony_credentials/" + url.PathEscape(a.TelnyxVoiceCredentialID) + "/token"
+	target := baseURL + "/v2/telephony_credentials/" + url.PathEscape(credentialID) + "/token"
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, nil)
 	if err != nil {
 		http.Error(w, "voice token unavailable", http.StatusBadGateway)
@@ -168,6 +171,7 @@ func (a *App) signalDeskVoiceToken(w http.ResponseWriter, r *http.Request) {
 	if telnyx, ok := a.Telnyx.(*provider.TelnyxClient); ok {
 		req.Header.Set("Authorization", "Bearer "+telnyx.Token)
 	}
+	req.Header.Set("Accept", "text/plain")
 	client := a.HTTP
 	if client == nil {
 		client = http.DefaultClient
@@ -183,8 +187,20 @@ func (a *App) signalDeskVoiceToken(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Telnyx could not create a call token."})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(payload)
+	token := strings.TrimSpace(string(payload))
+	if strings.HasPrefix(token, "{") {
+		var decoded struct {
+			Data string `json:"data"`
+		}
+		if json.Unmarshal(payload, &decoded) == nil && decoded.Data != "" {
+			token = decoded.Data
+		}
+	}
+	if token == "" {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Telnyx returned an empty call token."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"data": token})
 }
 
 func (a *App) signalDeskUnknown(w http.ResponseWriter, r *http.Request) {
