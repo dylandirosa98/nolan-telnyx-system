@@ -152,7 +152,7 @@ func (s *Store) RecentUnknownInbound(ctx context.Context, limit int) ([]UnknownI
 		SELECT i.provider_event_id,i.from_number,i.to_number,i.body,
 			(EXTRACT(EPOCH FROM i.created_at)*1000)::bigint
 		FROM inbound_messages i
-		WHERE i.created_at >= (date_trunc('day', now() AT TIME ZONE 'America/Detroit') AT TIME ZONE 'America/Detroit')
+		WHERE i.created_at >= TIMESTAMPTZ '2026-10-04 00:00:00 America/Detroit'
 		AND NOT EXISTS (
 			SELECT 1 FROM outbound_jobs o
 			WHERE o.to_number=i.from_number AND o.created_at<=i.created_at
