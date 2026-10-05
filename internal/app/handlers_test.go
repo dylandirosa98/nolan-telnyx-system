@@ -7,13 +7,46 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"example.com/ghl-telnyx-integration/internal/provider"
 	"example.com/ghl-telnyx-integration/internal/workflow"
 )
+
+func TestSignalDeskConversationsRequireTokenAndAllowedLocation(t *testing.T) {
+	conversation := provider.Conversation{ContactNumber: "+13125551212", LastBody: "hello", LastDirection: "inbound", LastAt: 1}
+	a := &App{
+		SignalDeskToken:    "desk-secret",
+		AllowedLocationIDs: []string{"loc-allowed"},
+		HighLevel:          &provider.FakeHighLevel{Conversations: []provider.Conversation{conversation}},
+	}
+
+	unauthorized := httptest.NewRecorder()
+	a.Routes().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/signal-desk/conversations?location_id=loc-allowed", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/signal-desk/conversations?location_id=loc-allowed", nil)
+	request.Header.Set("Authorization", "Bearer desk-secret")
+	response := httptest.NewRecorder()
+	a.Routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "+13125551212") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	blocked := httptest.NewRequest(http.MethodGet, "/signal-desk/conversations?location_id=other", nil)
+	blocked.Header.Set("Authorization", "Bearer desk-secret")
+	blockedResponse := httptest.NewRecorder()
+	a.Routes().ServeHTTP(blockedResponse, blocked)
+	if blockedResponse.Code != http.StatusForbidden {
+		t.Fatalf("blocked status=%d", blockedResponse.Code)
+	}
+}
 
 func TestHighLevelOutboundRejectsUnknownLocation(t *testing.T) {
 	a := &App{HLSecret: "test-secret", LocationID: "loc-allowed", FromNumber: "+13125551212"}

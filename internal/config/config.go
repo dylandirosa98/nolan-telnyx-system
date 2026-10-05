@@ -16,6 +16,7 @@ type Config struct {
 	DatabaseURL, TelnyxBaseURL, TelnyxToken, TelnyxProfileID, FromNumber                   string
 	HighLevelToken, HighLevelBaseURL, HighLevelLocationID, HighLevelConversationProviderID string
 	HighLevelWebhookSecret, AdminToken                                                     string
+	SignalDeskToken, SignalDeskWebhookURL                                                  string
 	HighLevelClientID, HighLevelClientSecret, HighLevelRedirectURI, HighLevelUserType      string
 	EnabledWorkflowKeys, AllowedLocationIDs                                                []string
 	WebhookKey                                                                             ed25519.PublicKey
@@ -37,6 +38,8 @@ func Load() (Config, error) {
 		HighLevelConversationProviderID: os.Getenv("HIGHLEVEL_CONVERSATION_PROVIDER_ID"),
 		HighLevelWebhookSecret:          os.Getenv("HIGHLEVEL_WEBHOOK_SECRET"),
 		AdminToken:                      os.Getenv("ADMIN_TOKEN"),
+		SignalDeskToken:                 os.Getenv("SIGNAL_DESK_TOKEN"),
+		SignalDeskWebhookURL:            os.Getenv("SIGNAL_DESK_WEBHOOK_URL"),
 		HighLevelClientID:               os.Getenv("HIGHLEVEL_CLIENT_ID"),
 		HighLevelClientSecret:           os.Getenv("HIGHLEVEL_CLIENT_SECRET"),
 		HighLevelRedirectURI:            os.Getenv("HIGHLEVEL_REDIRECT_URI"),

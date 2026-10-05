@@ -14,6 +14,8 @@ Do not upload CSVs to this service. Contact import, consent records, and campaig
 
 Install Go 1.25 or newer, or use the pinned Go 1.26.8 build image in the Dockerfile. With Docker Compose v2 unavailable, the tested command is `docker-compose up --build`. Health is `GET /healthz`; readiness is `GET /readyz`. Operator inbox is `http://localhost:8088/inbox` (no login; keys stay in env). Authenticated operator status is `GET /admin/status` with `Authorization: Bearer $ADMIN_TOKEN`.
 
+Signal Desk uses `SIGNAL_DESK_TOKEN` to authenticate its read-only HighLevel conversation proxy at `GET /signal-desk/conversations?location_id=...`. `SIGNAL_DESK_WEBHOOK_URL` optionally mirrors verified Telnyx webhook bodies to Signal Desk; forwarded requests are marked to prevent webhook loops.
+
 Commands: `make fmt`, `make test`, `make vet`, `make race`, `make build`.
 
 Set `DATABASE_URL` to run the Compose-backed end-to-end tests.

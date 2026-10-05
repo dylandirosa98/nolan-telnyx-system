@@ -196,6 +196,48 @@ func TestHighLevelClientReadsSMSFromNumberColumn(t *testing.T) {
 	}
 }
 
+func TestHighLevelClientLoadsRecentSMSConversations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/conversations/search":
+			if r.URL.Query().Get("locationId") != "loc-2" || r.URL.Query().Get("lastMessageType") != "TYPE_SMS" || r.URL.Query().Get("limit") != "20" {
+				t.Fatalf("query=%s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"conversations": []map[string]any{{
+					"id": "conversation-1", "contactId": "contact-1", "phone": "+13125551212",
+					"lastMessageBody": "latest", "lastMessageDirection": "outbound", "lastMessageDate": "2026-10-04T12:00:00Z",
+				}},
+			})
+		case "/conversations/conversation-1/messages":
+			if r.URL.Query().Get("type") != "TYPE_SMS" || r.URL.Query().Get("limit") != "30" {
+				t.Fatalf("message query=%s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"messages": map[string]any{
+					"messages": []map[string]any{{
+						"id": "message-1", "altId": "provider-1", "body": "latest", "direction": "outbound",
+						"from": "+17405552852", "to": "+13125551212", "dateAdded": "2026-10-04T12:00:00Z",
+					}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &HighLevelClient{BaseURL: server.URL, Token: "token", LocationID: "loc-1", HTTP: server.Client()}
+	conversations, err := client.RecentConversations(context.Background(), "loc-2", 20)
+	if err != nil || len(conversations) != 1 {
+		t.Fatalf("conversations=%#v err=%v", conversations, err)
+	}
+	got := conversations[0]
+	if got.ContactNumber != "+13125551212" || got.TelnyxNumber != "+17405552852" || got.LastBody != "latest" || got.LastDirection != "outbound" || got.MessageCount != 1 || got.LastAt == 0 {
+		t.Fatalf("conversation=%#v", got)
+	}
+}
+
 type refreshingToken struct{ current, next string }
 
 func (r refreshingToken) Token(context.Context) (string, error) { return r.current, nil }

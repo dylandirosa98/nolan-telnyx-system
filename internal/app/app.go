@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,6 +30,8 @@ type App struct {
 	HighLevelWebhookKey                     ed25519.PublicKey
 	HLSecret                                string
 	AdminToken                              string
+	SignalDeskToken                         string
+	SignalDeskWebhookURL                    string
 	LocationID                              string
 	AllowedLocationIDs                      []string
 	FromNumber                              string
@@ -36,6 +39,7 @@ type App struct {
 	VAPIDPublic, VAPIDPrivate, VAPIDSubject string
 	Workflows                               map[string]workflow.Definition
 	Logger                                  *slog.Logger
+	HTTP                                    *http.Client
 }
 
 func (a *App) Routes() http.Handler {
@@ -56,7 +60,33 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("/oauth/callback", a.oauthCallback)
 	m.HandleFunc("/oauth/highlevel/start", a.oauthStart)
 	m.HandleFunc("/oauth/highlevel/callback", a.oauthCallback)
+	m.HandleFunc("/signal-desk/conversations", a.signalDeskConversations)
 	return m
+}
+
+func (a *App) signalDeskConversations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.SignalDeskToken == "" || !bearerSecretOK(r.Header.Get("Authorization"), a.SignalDeskToken) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	locationID := strings.TrimSpace(r.URL.Query().Get("location_id"))
+	if !a.allowsLocation(r.Context(), locationID) {
+		http.Error(w, "unknown location", http.StatusForbidden)
+		return
+	}
+	conversations, err := a.HighLevel.RecentConversations(r.Context(), locationID, 20)
+	if err != nil {
+		a.logger().Error("load HighLevel conversations", "location_id", locationID, "error", err)
+		http.Error(w, "conversations unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"conversations": conversations})
 }
 
 func (a *App) ready(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +284,41 @@ func (a *App) telnyx(w http.ResponseWriter, r *http.Request) {
 			a.logger().Error("process inbound", "error", err)
 		}
 	}
+	if a.SignalDeskWebhookURL != "" && r.Header.Get("x-signal-desk-forwarded") == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.forwardSignalDesk(ctx, r, body); err != nil {
+			a.logger().Error("forward Signal Desk webhook", "error", err)
+		}
+	}
+}
+
+func (a *App) forwardSignalDesk(ctx context.Context, source *http.Request, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.SignalDeskWebhookURL, strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-signal-desk-forwarded", "1")
+	for _, name := range []string{"telnyx-signature-ed25519", "telnyx-timestamp"} {
+		if value := source.Header.Get(name); value != "" {
+			req.Header.Set(name, value)
+		}
+	}
+	client := a.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Signal Desk webhook returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (a *App) processInbound(ctx context.Context, eventID, from, to, text string) error {

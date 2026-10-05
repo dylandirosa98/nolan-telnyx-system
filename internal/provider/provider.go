@@ -24,12 +24,34 @@ type ContactHit struct {
 	ID, Name, Phone string
 }
 
+type ConversationMessage struct {
+	ID                string `json:"id"`
+	ProviderMessageID string `json:"providerMessageId"`
+	Direction         string `json:"direction"`
+	ContactNumber     string `json:"contactNumber"`
+	TelnyxNumber      string `json:"telnyxNumber"`
+	Body              string `json:"body"`
+	MediaJSON         string `json:"mediaJson"`
+	OccurredAt        int64  `json:"occurredAt"`
+}
+
+type Conversation struct {
+	ContactNumber string                `json:"contactNumber"`
+	TelnyxNumber  string                `json:"telnyxNumber"`
+	LastBody      string                `json:"lastBody"`
+	LastDirection string                `json:"lastDirection"`
+	LastAt        int64                 `json:"lastAt"`
+	MessageCount  int                   `json:"messageCount"`
+	Messages      []ConversationMessage `json:"messages"`
+}
+
 type HighLevel interface {
 	ForwardInbound(context.Context, Inbound) error
 	SetSMSDND(context.Context, string) error
 	UpdateMessageStatus(context.Context, string, string) error
 	ExecuteCRM(context.Context, CRMJob) error
 	SearchContacts(context.Context, string) ([]ContactHit, error)
+	RecentConversations(context.Context, string, int) ([]Conversation, error)
 	SendingNumber(context.Context, string) (string, error)
 }
 

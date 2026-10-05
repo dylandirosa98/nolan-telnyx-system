@@ -39,3 +39,7 @@ Installation starts through the authenticated `/oauth/highlevel/start` route, wh
 ## 2026-09-05 — Bounded inbound and delivery retries
 
 Inbound forwarding and HighLevel delivery-status synchronization retry with exponential delays and become operator-visible dead letters after 5 failed background attempts. Inbound `message.received` events are ignored unless they target the configured sending number, and workflow replies are claimed by both contact phone and that sending number. Rejected: infinite one-minute retries because permanent mapping or authorization errors would consume capacity forever without becoming operator-visible.
+
+## 2026-10-04 — Signal Desk reads conversations through the OAuth service
+
+Signal Desk obtains each installed location's latest SMS conversations through an authenticated endpoint on this service, which reuses the location-scoped OAuth tokens already stored here. Verified Telnyx webhooks are also mirrored to Signal Desk with a loop-prevention header so its unknown-sender inbox can coexist with the existing HighLevel forwarding path. Rejected: exposing OAuth tokens to the custom page, creating separate HighLevel private-integration tokens per location, or moving the Telnyx webhook away from this durable service.

@@ -29,14 +29,15 @@ func (f *FakeTelnyx) OwnedNumbers(context.Context) ([]string, error) {
 }
 
 type FakeHighLevel struct {
-	Mu          sync.Mutex
-	Inbound     []Inbound
-	DND         []string
-	Statuses    map[string]string
-	CRM         []CRMJob
-	Contacts    []ContactHit
-	FromNumbers map[string]string
-	Err         error
+	Mu            sync.Mutex
+	Inbound       []Inbound
+	DND           []string
+	Statuses      map[string]string
+	CRM           []CRMJob
+	Contacts      []ContactHit
+	Conversations []Conversation
+	FromNumbers   map[string]string
+	Err           error
 }
 
 func (f *FakeHighLevel) ForwardInbound(_ context.Context, i Inbound) error {
@@ -92,6 +93,18 @@ func (f *FakeHighLevel) SearchContacts(_ context.Context, _ string) ([]ContactHi
 		return nil, f.Err
 	}
 	return append([]ContactHit(nil), f.Contacts...), nil
+}
+
+func (f *FakeHighLevel) RecentConversations(_ context.Context, _ string, limit int) ([]Conversation, error) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if limit <= 0 || limit > len(f.Conversations) {
+		limit = len(f.Conversations)
+	}
+	return append([]Conversation(nil), f.Conversations[:limit]...), nil
 }
 
 func (f *FakeHighLevel) SendingNumber(_ context.Context, contactID string) (string, error) {

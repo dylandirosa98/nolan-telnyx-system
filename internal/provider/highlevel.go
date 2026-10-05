@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -149,6 +150,124 @@ func (c *HighLevelClient) SearchContacts(ctx context.Context, query string) ([]C
 		hits = append(hits, ContactHit{ID: contact.ID, Name: name, Phone: contact.Phone})
 	}
 	return hits, nil
+}
+
+func (c *HighLevelClient) RecentConversations(ctx context.Context, locationID string, limit int) ([]Conversation, error) {
+	locationID = strings.TrimSpace(locationID)
+	if locationID == "" {
+		return nil, fmt.Errorf("HighLevel location id is required")
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 20
+	}
+	client := c.forLocation(locationID)
+	values := url.Values{
+		"locationId":      {locationID},
+		"limit":           {strconv.Itoa(limit)},
+		"sort":            {"desc"},
+		"sortBy":          {"last_message_date"},
+		"status":          {"recents"},
+		"lastMessageType": {"TYPE_SMS"},
+	}
+	var search struct {
+		Conversations []struct {
+			ID, ContactID, Phone, LastMessageBody, LastMessageDirection string
+			LastMessageDate                                             json.RawMessage `json:"lastMessageDate"`
+		} `json:"conversations"`
+	}
+	if err := client.doJSON(ctx, http.MethodGet, "/conversations/search?"+values.Encode(), nil, &search); err != nil {
+		return nil, err
+	}
+
+	result := make([]Conversation, 0, len(search.Conversations))
+	for _, summary := range search.Conversations {
+		if summary.ID == "" {
+			continue
+		}
+		messageValues := url.Values{"limit": {"30"}, "type": {"TYPE_SMS"}}
+		var history struct {
+			Messages struct {
+				Messages []struct {
+					ID, AltID, Body, Direction, From, To string
+					DateAdded                            json.RawMessage `json:"dateAdded"`
+					Attachments                          []string        `json:"attachments"`
+				} `json:"messages"`
+			} `json:"messages"`
+		}
+		if err := client.doJSON(ctx, http.MethodGet, "/conversations/"+url.PathEscape(summary.ID)+"/messages?"+messageValues.Encode(), nil, &history); err != nil {
+			return nil, err
+		}
+
+		conversation := Conversation{
+			ContactNumber: summary.Phone,
+			LastBody:      summary.LastMessageBody,
+			LastDirection: strings.ToLower(summary.LastMessageDirection),
+			LastAt:        providerTime(summary.LastMessageDate),
+			Messages:      make([]ConversationMessage, 0, len(history.Messages.Messages)),
+		}
+		for _, message := range history.Messages.Messages {
+			contactNumber, telnyxNumber := message.To, message.From
+			if strings.EqualFold(message.Direction, "inbound") {
+				contactNumber, telnyxNumber = message.From, message.To
+			}
+			if conversation.ContactNumber == "" {
+				conversation.ContactNumber = contactNumber
+			}
+			if conversation.TelnyxNumber == "" && telnyxNumber != "" {
+				conversation.TelnyxNumber = telnyxNumber
+			}
+			media, _ := json.Marshal(message.Attachments)
+			occurredAt := providerTime(message.DateAdded)
+			conversation.Messages = append(conversation.Messages, ConversationMessage{
+				ID: message.ID, ProviderMessageID: firstNonEmpty(message.AltID, message.ID),
+				Direction: strings.ToLower(message.Direction), ContactNumber: contactNumber,
+				TelnyxNumber: telnyxNumber, Body: message.Body, MediaJSON: string(media), OccurredAt: occurredAt,
+			})
+		}
+		conversation.MessageCount = len(conversation.Messages)
+		if len(conversation.Messages) > 0 {
+			latest := conversation.Messages[0]
+			conversation.LastBody = latest.Body
+			conversation.LastDirection = latest.Direction
+			conversation.LastAt = latest.OccurredAt
+		}
+		if conversation.LastAt == 0 {
+			conversation.LastAt = time.Now().UTC().UnixMilli()
+		}
+		if conversation.LastDirection != "outbound" {
+			conversation.LastDirection = "inbound"
+		}
+		result = append(result, conversation)
+	}
+	return result, nil
+}
+
+func providerTime(raw json.RawMessage) int64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var number float64
+	if json.Unmarshal(raw, &number) == nil {
+		if number < 1e12 {
+			number *= 1000
+		}
+		return int64(number)
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return 0
+	}
+	if number, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if number < 1e12 {
+			number *= 1000
+		}
+		return number
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return 0
+	}
+	return parsed.UnixMilli()
 }
 
 func (c *HighLevelClient) SendingNumber(ctx context.Context, contactID string) (string, error) {
